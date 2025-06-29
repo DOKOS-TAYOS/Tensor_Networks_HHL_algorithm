@@ -25,7 +25,7 @@ The project implements a classical simulation of the quantum Harrow-Hassidim-Llo
 Install the dependencies with:
 
 ```bash
-pip install numpy matplotlib scipy torch tqdm
+pip install numpy matplotlib scipy torch qiskit qiskit_ibm_runtime qiskit_aer
 ```
 
 The notebook is compatible with standard Python 3.x and requires no GPU. All computations were tested on CPU.
