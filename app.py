@@ -114,8 +114,8 @@ with right_col:
             'u1y': 4.0,
             'u2y': 2.0,
             'dxy': 0.5,
-            'nx': 20,
-            'ny': 20
+            'nx': 15,
+            'ny': 15
         }
     }
 
@@ -273,3 +273,4 @@ with right_col:
 
             except Exception as e:
                 st.error(f"❌ An error occurred: {str(e)}")
+
