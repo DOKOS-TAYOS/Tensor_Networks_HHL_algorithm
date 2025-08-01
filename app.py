@@ -78,9 +78,9 @@ with left_col:
 
     with col2:
         num_eigen = st.slider("🔢 Number of eigenvalues",
-                             min_value=int(2000/10),
-                             max_value=int(2000*10),
-                             value=2000,
+                             min_value=int(1000/10),
+                             max_value=int(2000),
+                             value=1000,
                              help="Number of eigenvalues to use in the calculation")
 
 with right_col:
@@ -273,4 +273,5 @@ with right_col:
 
             except Exception as e:
                 st.error(f"❌ An error occurred: {str(e)}")
+
 
