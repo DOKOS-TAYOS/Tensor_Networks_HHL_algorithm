@@ -21,6 +21,13 @@ st.set_page_config(
     layout="wide"
 )
 
+# Add LinkedIn metadata
+st.markdown("""
+    <meta property="og:title" content="HHL Algorithm Solver with Tensor Networks">
+    <meta property="og:description" content="Interactive web app for solving linear systems using the HHL quantum algorithm with tensor networks">
+    <meta property="og:image" content="https://raw.githubusercontent.com/DOKOS-TAYOS/Tensor_Networks_HHL_algorithm/main/thumbnail.png">
+""", unsafe_allow_html=True)
+
 # Create two columns for the entire layout
 left_col, right_col = st.columns([1, 1])
 
