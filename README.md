@@ -10,6 +10,8 @@ This repository accompanies the work presented in the paper:
 > Alejandro Mata Ali and Iñigo Perez Delgado and Marina Ristol Roura and Aitor Moreno Fdez. de Leceta and Sebastián V. Romero (2025)
 > [arXiv:2309.05290](https://arxiv.org/abs/2309.05290)
 
+It can be consulted online in the Streamlit webpage: [https://tensornetworks-hhl-algorithm.streamlit.app/](https://tensornetworks-hhl-algorithm.streamlit.app/)
+
 The project implements a classical simulation of the quantum Harrow-Hassidim-Lloyd (HHL) algorithm using tensor networks and qudit formalism. The goal is to provide a quantum-inspired solver that models the ideal behavior of HHL efficiently on classical hardware, enabling benchmarking and theoretical lower-bound estimations.
 
 ---
