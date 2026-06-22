@@ -1,6 +1,6 @@
-streamlit
-numpy
-matplotlib
-torch
-tensornetwork
-scipy
+streamlit>=1.58.0
+numpy>=2.5.0
+matplotlib>=3.11.0
+torch>=2.12.1
+tensornetwork>=0.4.6
+scipy>=1.18.0
