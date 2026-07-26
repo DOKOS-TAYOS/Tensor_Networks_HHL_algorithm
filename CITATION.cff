@@ -1,0 +1,55 @@
+cff-version: 1.2.0
+message: If you use this software or the associated paper, please cite it using these metadata.
+title: "Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective"
+type: software
+authors:
+  - family-names: Mata Ali
+    given-names: Alejandro
+    email: alejandro.mata.ali@gmail.com
+license: MIT
+repository-code: "https://github.com/DOKOS-TAYOS/Tensor_Networks_HHL_algorithm"
+url: "https://arxiv.org/abs/2309.05290"
+abstract: >-
+  This work presents a new approach for simulating the HHL linear systems of
+  equations solver algorithm with tensor networks. First, a novel HHL in the
+  qudits formalism, the generalization of qubits, is developed, and then its
+  operations are transformed into an equivalent classical HHL, taking advantage
+  of the non-unitary operations that they can apply. The main novelty of this
+  proposal is to perform a classical simulation of the HHL as efficiently as
+  possible to benchmark the algorithm steps according to its input parameters
+  and the input matrix.
+keywords:
+  - HHL
+  - tensor networks
+  - linear systems
+  - quantum computing
+  - qudits
+  - Qiskit
+identifiers:
+  - type: other
+    value: "arXiv:2309.05290"
+    description: arXiv preprint identifier
+  - type: doi
+    value: 10.48550/arXiv.2309.05290
+preferred-citation:
+  type: article
+  authors:
+    - family-names: Mata Ali
+      given-names: Alejandro
+    - family-names: Perez Delgado
+      given-names: Iñigo
+    - family-names: Ristol Roura
+      given-names: Marina
+    - family-names: Moreno Fdez. de Leceta
+      given-names: Aitor
+    - family-names: Romero
+      given-names: Sebastián V.
+  title: "Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective"
+  year: 2023
+  month: 9
+  doi: 10.48550/arXiv.2309.05290
+  url: "https://arxiv.org/abs/2309.05290"
+  identifiers:
+    - type: other
+      value: "arXiv:2309.05290"
+      description: arXiv preprint identifier

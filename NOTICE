@@ -1,0 +1,22 @@
+Third-Party Notices
+===================
+
+This project depends on the following third-party libraries. Their licenses
+remain those of their respective copyright holders. These packages are runtime
+dependencies and are not vendored in this repository; install them separately
+(see requirements.txt and requirements_experiments.txt).
+
+Qiskit
+  https://github.com/Qiskit/qiskit
+  License: Apache License 2.0 (Apache-2.0)
+
+qiskit-aer
+  https://github.com/Qiskit/qiskit-aer
+  License: Apache License 2.0 (Apache-2.0)
+
+torch (PyTorch)
+  https://github.com/pytorch/pytorch
+  License: BSD-style license (see the PyTorch LICENSE file)
+
+Other declared runtime dependencies (for example numpy, scipy, matplotlib,
+and streamlit) likewise remain under their upstream licenses and terms.

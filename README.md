@@ -77,7 +77,7 @@ The notebook is reproducible and self-contained. It includes exact matrix defini
 
 ## Reference
 
-If you use this code, please cite the original paper:
+If you use this code, please cite the original paper (also encoded in [`CITATION.cff`](CITATION.cff)):
 
 ```bibtex
 @misc{ali2024solvingsystemslinearequations,
@@ -93,6 +93,10 @@ If you use this code, please cite the original paper:
 
 ---
 
-## License
+## License and copyright
 
-MIT License (c) Alejandro Mata Ali, 2025
+This **software** is released under the MIT License. Copyright (c) 2025 Alejandro Mata Ali — see [`LICENSE`](LICENSE).
+
+The accompanying **paper** ([arXiv:2309.05290](https://arxiv.org/abs/2309.05290)) lists additional coauthors (Iñigo Perez Delgado, Marina Ristol Roura, Aitor Moreno Fdez. de Leceta, and Sebastián V. Romero). Paper authorship is for scientific credit and citation; it does **not** change the software copyright holder named in `LICENSE`.
+
+Third-party runtime dependencies (including Qiskit and PyTorch) are described in [`NOTICE`](NOTICE).
