@@ -10,8 +10,8 @@ def solve_problem(problem: str, params: dict, num_eigen: int, t: float):
     Args:
         problem: Type of problem ('OAF', 'OAA' or 'C2D')
         params: Dictionary containing problem parameters
-        num_eigen: Number of eigenvalues to use
-        t: Time parameter for the algorithm
+        num_eigen: Phase-register dimension ``mu`` (historical API name)
+        t: Spectral-resolution parameter ``tau`` (historical API name)
         
     Returns:
         algorithm_result: Solution from tensor network HHL

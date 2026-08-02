@@ -64,8 +64,25 @@ Each section is self-contained and annotated for clarity.
 
 * The notebook encodes the HHL quantum circuit using tensor networks.
 * It implements all gates (QPE, inversion, unitaries) as tensor contractions.
-* Eigenvalue resolution (parameter `mu`) and time evolution (parameter `tau`) are tunable.
-* The final solution vector \$\vec{x}\$ is obtained deterministically, bypassing quantum limitations like post-selection.
+* The final solution vector $\vec{x}$ is obtained deterministically, bypassing quantum limitations like post-selection.
+
+### Parameter conventions
+
+* `tau` (API name `t`) sets the spectral grid spacing: $\Delta\lambda = 1/\tau$.
+* `mu` (API names `n_eigen` / `num_eigen`) is the phase-register dimension. It is **not** by itself the spectral resolution.
+* The signed non-aliased spectral range depends on both parameters: $|\lambda| < \mu/(2\tau)$, equivalently $|\tau\lambda| < \mu/2$.
+* `n_c` is used only for a binary phase register with $\mu = 2^{n_c}$. The general tensor implementation does not require $\mu$ to be a power of two.
+* In the quantum-circuit HHL, `C` is the ancilla controlled-rotation scale constant and must satisfy $|C/\lambda_j| \le 1$ for all relevant eigenvalues.
+
+### Fourier and inversion conventions
+
+* The paper derivation uses the unnormalized Fourier matrix $H[a,b]=\exp(2\pi i\,ab/\mu)$, with $H^{-1}=H^\dagger/\mu$.
+* The code uses the **normalized** QFT $F=H/\sqrt{\mu}$, which is unitary.
+* The inverter tensor stores the global factor $\tau/\mu$ so that the normalized implementation remains equivalent to the paper's unnormalized formulation.
+
+### Real-valued experimental scope
+
+The numerical experiments accompanying the current paper use real-valued matrices and right-hand sides. The present public implementation returns real-valued solution vectors and has been validated only for this real-valued benchmark setting. The underlying tensor-network formulation is **not** restricted to real systems. Supporting genuinely complex-valued inputs would require retaining the complete complex output and using phase-aware validation metrics.
 
 ---
 

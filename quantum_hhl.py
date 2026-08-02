@@ -20,11 +20,14 @@ def HHL_circuit(n_ancillas: int, b_vector: torch.Tensor, A_matrix: torch.Tensor,
     4. Inverse phase estimation
     
     Args:
-        n_ancillas (int): Number of ancilla qubits for phase estimation (determines precision)
+        n_ancillas (int): Number of clock qubits for the binary phase register;
+            the phase-register dimension is ``mu = 2**n_ancillas`` (binary ``n_c``).
         b_vector (torch.Tensor): Input vector b of the linear system Ax = b
         A_matrix (torch.Tensor): Hermitian matrix A of the linear system (must be square)
-        t (float): Time parameter for unitary evolution operator U = exp(iAt)
-        C (float): Scaling parameter for rotation angles (typically C ≤ min eigenvalue)
+        t (float): Spectral-resolution parameter ``tau`` for the evolution
+            (historical name ``t``). Grid spacing is ``Delta lambda = 1/tau``.
+        C (float): Ancilla controlled-rotation scale constant. Must satisfy
+            ``|C / lambda_j| <= 1`` for all relevant eigenvalues.
     
     Returns:
         QuantumCircuit: Complete HHL quantum circuit ready for execution

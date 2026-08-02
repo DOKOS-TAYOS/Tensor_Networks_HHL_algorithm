@@ -70,18 +70,18 @@ with left_col:
     col1, col2 = st.columns(2)
     with col1:
         default_t = 6000 if problem == 'OAF' else (11000 if problem == 'OAA' else 100)
-        t = st.slider("⏱️ Time parameter (t)",
+        t = st.slider("⏱️ Spectral parameter τ (API name t)",
                       min_value=int(default_t/10),
                       max_value=int(default_t*10),
                       value=default_t,
-                      help="Time parameter for the evolution operator")
+                      help="Spectral-resolution parameter tau: Delta lambda = 1/tau")
 
     with col2:
-        num_eigen = st.slider("🔢 Number of eigenvalues",
+        num_eigen = st.slider("🔢 Phase-register size μ (API name num_eigen)",
                              min_value=int(1000/10),
                              max_value=int(3000),
                              value=2000,
-                             help="Number of eigenvalues to use in the calculation")
+                             help="Phase-register dimension mu (not a count of eigenvalues)")
 
 with right_col:
     # Default parameters for each problem
