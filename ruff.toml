@@ -1,0 +1,8 @@
+extend-exclude = [
+  "app.py",
+  "quantum_hhl.py",
+  "tensor_network_HHL.ipynb",
+  "test.py",
+  "test_conventions.py",
+  "tn_hhl.py",
+]

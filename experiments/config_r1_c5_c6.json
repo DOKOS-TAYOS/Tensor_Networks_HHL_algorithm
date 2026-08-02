@@ -1,0 +1,68 @@
+{
+  "mu_candidates": [128, 256, 512, 1024, 2000, 4096],
+  "parameter_selection_method": "exact_spectral_benchmark_oracle",
+  "tau_points_per_mu": 40,
+  "zero_bin_separation": 0.5,
+  "no_aliasing_safety_factor": 0.9,
+  "target_rhs_filter_relative_error": 0.01,
+  "singular_tolerance": 1e-12,
+  "grid_tolerance": 1e-10,
+  "timing_repetitions": 5,
+  "random": {
+    "seed": 12345,
+    "instances": 20,
+    "dimension": 16,
+    "off_diagonal_density": 0.25,
+    "max_condition_number": 10000.0
+  },
+  "hyperparameter_sweep": {
+    "tau_values": [0.1, 1.0, 10.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 10000.0],
+    "n_c_values": [5, 6, 7, 8, 9, 10, 11, 12, 13],
+    "evaluation_method": "spectral_filter_equivalent"
+  },
+  "tn_filter_validation": {
+    "instance_ids": [0, 7, 14],
+    "relative_agreement_tolerance": 1e-9,
+    "points": [
+      {"n_c": 5, "tau": 1.0},
+      {"n_c": 7, "tau": 10.0},
+      {"n_c": 9, "tau": 100.0},
+      {"n_c": 10, "tau": 500.0},
+      {"n_c": 11, "tau": 1000.0},
+      {"n_c": 5, "tau": 100.0}
+    ]
+  },
+  "problems": {
+    "harmonic_oscillator": {
+      "T": 50.0,
+      "dt": 0.5,
+      "k": 5.0,
+      "m": 7.0,
+      "nu": 0.4,
+      "C": 9.0,
+      "x0": 5.0,
+      "xT": 3.0
+    },
+    "damped_oscillator": {
+      "T": 50.0,
+      "dt": 0.5,
+      "k": 5.0,
+      "m": 7.0,
+      "nu": 0.4,
+      "C": 9.0,
+      "gamma": 0.1,
+      "x0": 5.0,
+      "xT": 3.0
+    },
+    "heat_2d": {
+      "k": 3.0,
+      "u1x": 5.0,
+      "u2x": 3.0,
+      "u1y": 4.0,
+      "u2y": 2.0,
+      "dxy": 0.5,
+      "nx": 20,
+      "ny": 20
+    }
+  }
+}
