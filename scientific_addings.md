@@ -49,11 +49,13 @@ O(N^3)+
 O\left(\sum_{c=1}^{G}(N\mu_c+N^2)\right),
 \]
 
-where the first term is the eigendecomposition. This term should not be silently folded into the stated TN contraction complexity
+where the first term is the eigendecomposition. This term should not be silently folded into the TN cost. For fixed `(mu, tau)`, the theoretically optimized TN formulation discussed in the manuscript has contraction cost
 
 \[
-C_{\mathrm{TN}}=O(N^2\mu)+O(N\mu^2)+O(\mu^3).
+C_{\mathrm{TN,optimized}}=O(N^2\mu+N\mu^2+\mu^3).
 \]
+
+This is not a complete characterization of the current public `tn_hhl.py`: its preparation explicitly materializes `inverse_phase_kickback` and constructs dense matrix powers, adding work of order $O(\mu N^3)$.
 
 If end-to-end automatic solution is discussed, both costs must be stated. If the discussion concerns contraction complexity for fixed `(mu, tau)`, the calibration must be identified as separate benchmark preprocessing.
 
@@ -77,7 +79,7 @@ If the paper claimed only that TN is another efficient classical method for retu
 
 ## Sensitivity analysis and full-TN validation
 
-The complete sensitivity grid contains 81 `(tau, n_c)` points evaluated on 20 random matrices, or 1,620 outputs. It includes `mu=2**13=8192`. Executing the current dense TN contraction at every point is not practical because it materializes dense phase-register objects and includes an `O(mu**3)` term.
+The complete sensitivity grid contains 81 `(tau, n_c)` points evaluated on 20 random matrices, or 1,620 outputs. It includes `mu=2**13=8192`. Executing the current dense TN contraction at every point is not practical because its preparation explicitly performs $O(\mu N^3)$ work, retains dense phase-register operations including an $O(\mu^3)$ term, and materializes large dense tensors.
 
 The complete grid is therefore an ideal spectral-filter sensitivity analysis, not a full-TN runtime sweep. Every row is labeled `spectral_filter_equivalent`. It reports uncertainty across the 20 matrices and reveals phase-grid, aliasing, and condition-number effects over the complete predefined grid.
 
@@ -135,9 +137,9 @@ The measured timings also show why calibration must be reported separately. In t
 
 | Problem | Selector | TN contraction |
 |---|---:|---:|
-| Harmonic oscillator | 1.0839 s | 0.3479 s |
-| Damped oscillator | 1.8574 s | 2.0802 s |
-| Heat equation | 4.7182 s | 2.1554 s |
+| Harmonic oscillator | 1.1800 s | 0.3672 s |
+| Damped oscillator | 1.8891 s | 2.0659 s |
+| Heat equation | 4.8935 s | 2.0171 s |
 
 For most small random instances the exact selector is also slower than the selected TN contraction; for the largest selected `mu`, TN becomes comparable or dominant. These measurements support two simultaneous statements: the exact selector is acceptable as offline research calibration, but it is not a credible low-overhead component of a practical end-to-end solver. Timings are machine-dependent and should be taken from the regenerated artifacts when final tables are prepared.
 
