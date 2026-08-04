@@ -13,7 +13,7 @@ qiskit_tn_comparison,qiskit_exact_peak_rss_delta_bytes,exact Qiskit,20,36450304.
 qiskit_tn_comparison,tn_peak_rss_delta_bytes,TN,20,1141350.4,1286921.8228599182,251904.0,207872.0,2824192.0,539052.4469653743,1743648.3530346255
 qiskit_tn_comparison,qiskit_total_exact_seconds_over_tn_total_seconds,per-instance exact Qiskit / TN,20,69.14305846937611,30.13870735243347,72.26920929151503,45.52527537282667,81.8036760971479,55.0377092375633,83.24840770118894
 qiskit_tn_comparison,parameter_target_met_fraction,selected pairs (7/20),20,0.35,0.4893604849295929,0.0,0.0,1.0,0.12097224312031254,0.5790277568796874
-scaling,loglog_slope_tn_time_vs_N,empirical least-squares log-log fit over the tested points,4,0.19936241691228732,,,,,,
-scaling,loglog_slope_tn_peak_rss_vs_N,empirical least-squares log-log fit over the tested points,4,0.046494756449486856,,,,,,
-scaling,loglog_slope_tn_time_vs_mu,empirical least-squares log-log fit over the tested points,5,0.882146983221331,,,,,,
-scaling,loglog_slope_tn_peak_rss_vs_mu,empirical least-squares log-log fit over the tested points,5,0.017203502311983383,,,,,,
+scaling,loglog_slope_tn_time_vs_N,empirical least-squares log-log fit over the tested points,4,0.5960086979833248,,,,,,
+scaling,loglog_slope_tn_peak_rss_vs_N,empirical least-squares log-log fit over the tested points,4,0.04641359395348294,,,,,,
+scaling,loglog_slope_tn_time_vs_mu,empirical least-squares log-log fit over the tested points,5,0.6636228353848329,,,,,,
+scaling,loglog_slope_tn_peak_rss_vs_mu,empirical least-squares log-log fit over the tested points,5,0.01748851817319637,,,,,,
