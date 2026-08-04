@@ -24,6 +24,31 @@ from quantum_hhl import (
 from tn_hhl import tensornetwork_HHL
 
 
+def test_exact_qiskit_run_can_skip_sampled_shots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_measurement(*args: object, **kwargs: object) -> QuantumCircuit:
+        raise AssertionError("the measured circuit must not be constructed")
+
+    monkeypatch.setattr("quantum_hhl.add_solution_measurements", reject_measurement)
+    result = run_qiskit_hhl_once(
+        n_ancillas=3,
+        b_vector=torch.tensor([1.0, 2.0], dtype=torch.float64),
+        A_matrix=torch.diag(torch.tensor([1.0, -1.0], dtype=torch.float64)),
+        tau=1.0,
+        c_phys=0.25,
+        n_shots=2_000,
+        seed_transpiler=12345,
+        seed_simulator=12345,
+        include_shots=False,
+    )
+
+    assert result["shots_seconds"] == 0.0
+    assert result["successful_shots"] == 0
+    assert result["sampled_probabilities"] is None
+    assert result["success_probability_sampled"] is None
+
+
 def test_positive_and_negative_eigenvalues_reach_signed_qpe_bins() -> None:
     matrix = torch.diag(torch.tensor([1.0, -2.0], dtype=torch.float64))
     unitary = build_hhl_unitary(matrix, tau=1.0, mu=8)
@@ -195,6 +220,15 @@ def test_reviewer_comparison_csv_contains_twenty_valid_instances() -> None:
 
     assert len(rows) == 20
     assert {int(row["instance"]) for row in rows} == set(range(20))
+    memory_columns = {
+        "qiskit_exact_rss_baseline_bytes",
+        "qiskit_exact_peak_rss_bytes",
+        "qiskit_exact_peak_rss_delta_bytes",
+        "tn_rss_baseline_bytes",
+        "tn_peak_rss_bytes",
+        "tn_peak_rss_delta_bytes",
+    }
+    assert memory_columns <= rows[0].keys()
     for row in rows:
         assert int(row["seed"]) == 12345
         assert int(row["dimension"]) == 16
@@ -206,6 +240,7 @@ def test_reviewer_comparison_csv_contains_twenty_valid_instances() -> None:
         assert 0.0 <= float(row["fidelity_tn_qiskit"]) <= 1.0
         assert row["speedup_core_valid"] == "False"
         assert row["speedup_core"] == ""
+        assert all(int(row[column]) >= 0 for column in memory_columns)
 
 
 def test_legacy_keywords_and_measurement_layout_remain_available() -> None:

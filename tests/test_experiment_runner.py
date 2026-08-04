@@ -7,6 +7,7 @@ from pathlib import Path
 import torch
 
 from experiments.run_reviewer_r1_c5_c6 import compare_tn_and_filter, run_experiments
+from experiments.run_reviewer_r2_c3_c4 import run_scaling_experiment
 
 SCIENTIFIC_ARTIFACTS = {
     "application_results.csv",
@@ -73,3 +74,24 @@ def test_full_tn_matches_the_spectral_filter_on_an_exact_grid() -> None:
 
     assert row["tn_filter_relative_difference"] < 1e-10
     assert row["tn_filter_rmse"] < 1e-10
+
+
+def test_reviewer_r2_scaling_smoke() -> None:
+    rows = run_scaling_experiment(
+        n_values=(4, 8),
+        mu_values=(8, 16),
+        tau=10.0,
+        repetitions=1,
+        seed=12345,
+        n_sweep_mu=16,
+        mu_sweep_n=8,
+    )
+
+    assert rows
+    assert len(rows) == 4
+    for row in rows:
+        assert int(row["rss_baseline_bytes"]) >= 0
+        assert int(row["peak_rss_bytes"]) >= 0
+        assert int(row["peak_rss_delta_bytes"]) >= 0
+        assert row["no_aliasing"] is True
+        assert float(row["tn_filter_relative_difference"]) < 1e-9

@@ -132,6 +132,14 @@ The primary Qiskit result is an exact Aer statevector without measurements. It i
 
 For this comparison the selector is restricted to the predefined binary-register candidates `mu = 128, 256, 512, 1024`. It uses `C_phys = 0.9*min_j(abs(lambda_j))` and `C_bin = tau*C_phys`, rejects aliasing or assignment to the singular bin, and requires `C_bin <= 1` before constructing any rotation. No clipping is used. These stricter circuit-validity constraints mean that only 7 of the 20 selected pairs meet the separate 1% spectral-filter target; all 20 nevertheless remain valid paired TN-Qiskit comparisons.
 
+Reviewer 2 comments 3 and 4 add isolated-process memory measurements and a limited empirical scaling study:
+
+```bash
+python -m experiments.run_reviewer_r2_c3_c4
+```
+
+Peak RSS is monitored externally for each spawned worker and reported both as an absolute value and as the increment over RSS after warm-up. The scaling results cover only the stated finite ranges of `N` and `mu`; their fitted log-log slopes are empirical observations, not proofs of asymptotic complexity. The independently timed spectral filter is a validation reference. The Qiskit-TN benchmark compares two classical simulations of the same finite HHL map; it establishes neither quantum advantage nor superiority over classical linear solvers.
+
 The oscillator discretizations use 100 intervals and 101 nodes; the two prescribed endpoints leave 99 interior unknowns. The damped system therefore has a 99 by 99 physical matrix and a 198 by 198 Hermitian embedding.
 
 The `(mu, tau)` pairs are selected from a versioned, predefined logarithmic grid, now extending through `mu=4096`, using the predicted right-hand-side error of the HHL spectral filter. The selector is labeled `exact_spectral_benchmark_oracle`: it uses a full eigendecomposition and the classical reference solution as an offline calibration tool for controlled experiments. It is not presented as a practical parameter selector for an unknown large system. Its measured time is recorded separately from TN and reference-solver timings.
