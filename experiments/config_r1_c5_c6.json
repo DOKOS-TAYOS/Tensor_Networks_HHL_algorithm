@@ -16,8 +16,8 @@
     "max_condition_number": 10000.0
   },
   "qiskit_comparison": {
-    "mu_candidates": [128, 256, 512, 1024],
-    "controlled_rotation_scale": 0.9,
+    "mu_candidates": [128, 256, 512, 1024, 2048],
+    "controlled_rotation_safety_factor": 0.9,
     "shots": 100000,
     "timing_repetitions": 3,
     "seed_transpiler": 12345,

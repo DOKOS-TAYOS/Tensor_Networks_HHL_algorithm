@@ -4,10 +4,24 @@ import csv
 import json
 from pathlib import Path
 
+import numpy as np
 import torch
 
 from experiments.run_reviewer_r1_c5_c6 import compare_tn_and_filter, run_experiments
-from experiments.run_reviewer_r2_c3_c4 import run_scaling_experiment
+from experiments.run_reviewer_r2_c3_c4 import (
+    DEFAULT_MU_SWEEP_N,
+    DEFAULT_MU_VALUES,
+    DEFAULT_N_SWEEP_MU,
+    DEFAULT_N_VALUES,
+    DEFAULT_TAU,
+    MEMORY_COLUMNS,
+    build_summary_rows,
+    dominant_tensor_storage_estimate_bytes,
+    run_scaling_experiment,
+)
+from experiments.run_reviewer_r2_c3_c4 import (
+    run_experiments as run_reviewer_r2_experiments,
+)
 
 SCIENTIFIC_ARTIFACTS = {
     "application_results.csv",
@@ -82,6 +96,7 @@ def test_reviewer_r2_scaling_smoke() -> None:
         mu_values=(8, 16),
         tau=10.0,
         repetitions=1,
+        memory_repetitions=1,
         seed=12345,
         n_sweep_mu=16,
         mu_sweep_n=8,
@@ -90,8 +105,113 @@ def test_reviewer_r2_scaling_smoke() -> None:
     assert rows
     assert len(rows) == 4
     for row in rows:
-        assert int(row["rss_baseline_bytes"]) >= 0
-        assert int(row["peak_rss_bytes"]) >= 0
-        assert int(row["peak_rss_delta_bytes"]) >= 0
+        baseline = float(row["tn_rss_baseline_median_bytes"])
+        peak = float(row["tn_peak_rss_median_bytes"])
+        delta = float(row["tn_peak_rss_delta_median_bytes"])
+        assert baseline >= 0
+        assert peak >= baseline
+        assert delta == peak - baseline
+        assert int(row["dominant_tensor_storage_estimate_bytes"]) > 0
         assert row["no_aliasing"] is True
         assert float(row["tn_filter_relative_difference"]) < 1e-9
+
+
+def test_reviewer_r2_default_ranges_and_storage_estimate() -> None:
+    assert DEFAULT_N_VALUES == (16, 32, 64, 96, 128, 192, 256)
+    assert DEFAULT_MU_VALUES == (16, 32, 64, 128, 256, 512, 1024, 2048)
+    assert DEFAULT_N_SWEEP_MU == 64
+    assert DEFAULT_MU_SWEEP_N == 32
+    assert DEFAULT_TAU == 20.0
+    assert 20.0 * 0.35 < min(DEFAULT_MU_VALUES) / 2.0
+
+    fixed_mu = [dominant_tensor_storage_estimate_bytes(n, 64) for n in (16, 32, 64)]
+    fixed_n = [dominant_tensor_storage_estimate_bytes(32, mu) for mu in (16, 32, 64)]
+    assert fixed_mu == sorted(fixed_mu)
+    assert len(set(fixed_mu)) == len(fixed_mu)
+    assert fixed_n == sorted(fixed_n)
+    assert len(set(fixed_n)) == len(fixed_n)
+
+
+def _comparison_rows_with_memory(path: Path) -> list[dict[str, str]]:
+    with path.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    for index, row in enumerate(rows):
+        baseline = 100_000_000 + index
+        for prefix, delta in (("qiskit_exact", 20_000_000), ("tn", 2_000_000)):
+            row[f"{prefix}_rss_baseline_bytes"] = str(baseline)
+            row[f"{prefix}_peak_rss_bytes"] = str(baseline + delta)
+            row[f"{prefix}_peak_rss_delta_bytes"] = str(delta)
+    return rows
+
+
+def test_reviewer_r2_small_artifacts_regenerate(tmp_path: Path) -> None:
+    comparison_rows = _comparison_rows_with_memory(
+        Path("artifacts/reviewer_r1_c7_qiskit_comparison.csv")
+    )
+    comparison_csv = tmp_path / "comparison.csv"
+    with comparison_csv.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(comparison_rows[0]))
+        writer.writeheader()
+        writer.writerows(comparison_rows)
+
+    output_dir = tmp_path / "reviewer_r2"
+    run_reviewer_r2_experiments(
+        comparison_csv=comparison_csv,
+        output_dir=output_dir,
+        n_values=(4, 8, 12),
+        mu_values=(8, 16, 32),
+        tau=10.0,
+        repetitions=1,
+        memory_repetitions=1,
+        n_sweep_mu=32,
+        mu_sweep_n=8,
+    )
+
+    assert {path.name for path in output_dir.iterdir()} == {
+        "scaling.csv",
+        "summary.csv",
+        "scaling.pdf",
+    }
+    with (output_dir / "scaling.csv").open(newline="", encoding="utf-8") as stream:
+        scaling_rows = list(csv.DictReader(stream))
+    assert len(scaling_rows) == 6
+    assert "dominant_tensor_storage_estimate_bytes" in scaling_rows[0]
+    assert "tn_peak_rss_delta_median_bytes" in scaling_rows[0]
+    with (output_dir / "summary.csv").open(newline="", encoding="utf-8") as stream:
+        summary_rows = list(csv.DictReader(stream))
+    metrics = {row["metric"] for row in summary_rows}
+    assert "loglog_slope_tn_peak_rss_delta_vs_N" in metrics
+    assert "loglog_slope_tn_peak_rss_delta_vs_mu" in metrics
+    assert "loglog_slope_tn_peak_rss_vs_N" not in metrics
+
+
+def test_loglog_memory_fit_ignores_nonpositive_deltas() -> None:
+    comparison_rows = _comparison_rows_with_memory(
+        Path("artifacts/reviewer_r1_c7_qiskit_comparison.csv")
+    )
+    scaling_rows: list[dict[str, object]] = []
+    for sweep, x_key, deltas in (
+        ("N", "N", (1.0, 0.0, -1.0)),
+        ("mu", "mu", (1.0, 2.0, 4.0)),
+    ):
+        for index, delta in enumerate(deltas, start=1):
+            scaling_rows.append(
+                {
+                    "sweep": sweep,
+                    x_key: 2**index,
+                    "tn_total_median_seconds": float(index),
+                    "tn_peak_rss_delta_median_bytes": delta,
+                }
+            )
+
+    summary = build_summary_rows(comparison_rows, scaling_rows)
+    by_metric = {str(row["metric"]): row for row in summary}
+    unavailable = by_metric["loglog_slope_tn_peak_rss_delta_vs_N"]
+    assert unavailable["sample_count"] == 1
+    assert unavailable["mean"] == ""
+    assert "fewer than three" in str(unavailable["method"])
+    fitted = by_metric["loglog_slope_tn_peak_rss_delta_vs_mu"]
+    assert fitted["sample_count"] == 3
+    np.testing.assert_allclose(float(fitted["mean"]), 1.0, atol=1e-12)
+    assert not any("7/20" in str(value) for row in summary for value in row.values())
+    assert set(MEMORY_COLUMNS) <= comparison_rows[0].keys()
