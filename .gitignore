@@ -2,6 +2,8 @@
 __pycache__/
 tmp/
 artifacts/*
+!artifacts/reviewer_r1_c5_c6/
+!artifacts/reviewer_r1_c5_c6/**
 !artifacts/reviewer_r1_c7_qiskit_comparison.csv
 .pytest_cache/
 .ruff_cache/
