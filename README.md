@@ -18,7 +18,7 @@ The project implements a classical simulation of the quantum Harrow-Hassidim-Llo
 
 ## Files
 
-* `tensor_network_HHL.ipynb`: Jupyter notebook containing all code, explanations, experiments, and plots. It reproduces the results presented in the paper.
+- `tensor_network_HHL.ipynb`: Jupyter notebook containing all code, explanations, experiments, and plots. It reproduces the results presented in the paper.
 
 ---
 
@@ -47,14 +47,12 @@ You may execute all cells sequentially to:
 1. Define the tensor operations for the TN-HHL algorithm.
 2. Construct tensors for QPE, inversion, and evolution operators.
 3. Apply the method to benchmark problems:
-
-   * Forced harmonic oscillator
-   * Forced damped oscillator
-   * 2D static heat equation with sources
+  - Forced harmonic oscillator
+  - Forced damped oscillator
+  - 2D static heat equation with sources
 4. Compare TN-HHL performance to:
-
-   * Exact inversion (PyTorch)
-   * Qiskit HHL simulation (for small cases)
+  - Exact inversion (PyTorch)
+  - Qiskit HHL simulation (for small cases)
 
 Each section is self-contained and annotated for clarity.
 
@@ -62,23 +60,23 @@ Each section is self-contained and annotated for clarity.
 
 ## Summary of the Algorithm
 
-* The notebook encodes the HHL quantum circuit using tensor networks.
-* It implements all gates (QPE, inversion, unitaries) as tensor contractions.
-* The final solution vector $\vec{x}$ is obtained deterministically, bypassing quantum limitations like post-selection.
+- The notebook encodes the HHL quantum circuit using tensor networks.
+- It implements all gates (QPE, inversion, unitaries) as tensor contractions.
+- The final solution vector $\vec{x}$ is obtained deterministically, bypassing quantum limitations like post-selection.
 
 ### Parameter conventions
 
-* `tau` (API name `t`) sets the spectral grid spacing: $\Delta\lambda = 1/\tau$.
-* `mu` (API names `n_eigen` / `num_eigen`) is the phase-register dimension. It is **not** by itself the spectral resolution.
-* The signed non-aliased spectral range depends on both parameters: $|\lambda| < \mu/(2\tau)$, equivalently $|\tau\lambda| < \mu/2$.
-* `n_c` is used only for a binary phase register with $\mu = 2^{n_c}$. The general tensor implementation does not require $\mu$ to be a power of two.
-* In the quantum-circuit HHL, `C` is the ancilla controlled-rotation scale constant and must satisfy $|C/\lambda_j| \le 1$ for all relevant eigenvalues.
+- `tau` (API name `t`) sets the spectral grid spacing: $\Delta\lambda = 1/\tau$.
+- `mu` (API names `n_eigen` / `num_eigen`) is the phase-register dimension. It is **not** by itself the spectral resolution.
+- The signed non-aliased spectral range depends on both parameters: $|\lambda| < \mu/(2\tau)$, equivalently $|\tau\lambda| < \mu/2$.
+- `n_c` is used only for a binary phase register with $\mu = 2^{n_c}$. The general tensor implementation does not require $\mu$ to be a power of two.
+- In the quantum-circuit HHL, `C` is the ancilla controlled-rotation scale constant and must satisfy $|C/\lambda_j| \le 1$ for all relevant eigenvalues.
 
 ### Fourier and inversion conventions
 
-* The paper derivation uses the unnormalized Fourier matrix $H[a,b]=\exp(2\pi i\,ab/\mu)$, with $H^{-1}=H^\dagger/\mu$.
-* The code uses the **normalized** QFT $F=H/\sqrt{\mu}$, which is unitary.
-* The inverter tensor stores the global factor $\tau/\mu$ so that the normalized implementation remains equivalent to the paper's unnormalized formulation.
+- The paper derivation uses the unnormalized Fourier matrix $H[a,b]=\exp(2\pi iab/\mu)$, with $H^{-1}=H^\dagger/\mu$.
+- The code uses the **normalized** QFT $F=H/\sqrt{\mu}$, which is unitary.
+- The inverter tensor stores the global factor $\tau/\mu$ so that the normalized implementation remains equivalent to the paper's unnormalized formulation.
 
 ### Real-valued experimental scope
 
@@ -103,7 +101,8 @@ On Linux or macOS, use:
 
 ```bash
 source .venv/bin/activate
-python -m pip install -r requirements.txt -r requirements_experiments.txt
+python -m pip install -r requirements.txt
+python -m pip install -r requirements_experiments.txt
 ```
 
 After installation, generate all Reviewer 1 experiments with:
@@ -146,7 +145,7 @@ The `(mu, tau)` pairs are selected from a versioned, predefined logarithmic grid
 
 Random matrices use the fixed seed 12345. Sensitivity figures show two-sided 95% Student-t confidence intervals for the mean across 20 instances. The full 81-by-20 sensitivity sweep uses the algebraically equivalent spectral filter and is labeled `spectral_filter_equivalent`; it is not described as 1,620 TN contractions. A configured representative subset is executed with the complete TN contraction and written to `tn_filter_validation.csv`, which records TN/filter discrepancies and separate timings. Selected application and random runs also use the complete TN contraction.
 
-The benchmark-oracle selection cost is approximately `O(N^3 + sum_c(N*mu_c + N^2))` for the evaluated candidates, including the eigendecomposition. This calibration cost is distinct from the fixed-parameter TN contraction cost and must be included separately in any end-to-end runtime discussion. See [`scientific_addings.md`](scientific_addings.md) for the scientific interpretation and manuscript-facing caveats.
+The benchmark-oracle selection cost is approximately `O(N^3 + sum_c(N*mu_c + N^2))` for the evaluated candidates, including the eigendecomposition. This calibration cost is distinct from the fixed-parameter TN contraction cost and must be included separately in any end-to-end runtime discussion. See `[scientific_addings.md](scientific_addings.md)` for the scientific interpretation and manuscript-facing caveats.
 
 The versioned Python modules and the reviewer command above are the authoritative source for these additional diagnostics.
 
@@ -154,7 +153,7 @@ The versioned Python modules and the reviewer command above are the authoritativ
 
 ## Reference
 
-If you use this code, please cite the original paper (also encoded in [`CITATION.cff`](CITATION.cff)):
+If you use this code, please cite the original paper (also encoded in `[CITATION.cff](CITATION.cff)`):
 
 ```bibtex
 @misc{ali2024solvingsystemslinearequations,
@@ -172,8 +171,8 @@ If you use this code, please cite the original paper (also encoded in [`CITATION
 
 ## License and copyright
 
-This **software** is released under the MIT License. Copyright (c) 2025 Alejandro Mata Ali — see [`LICENSE`](LICENSE).
+This **software** is released under the MIT License. Copyright (c) 2025 Alejandro Mata Ali — see `[LICENSE](LICENSE)`.
 
 The accompanying **paper** ([arXiv:2309.05290](https://arxiv.org/abs/2309.05290)) lists additional coauthors (Iñigo Perez Delgado, Marina Ristol Roura, Aitor Moreno Fdez. de Leceta, and Sebastián V. Romero). Paper authorship is for scientific credit and citation; it does **not** change the software copyright holder named in `LICENSE`.
 
-Third-party runtime dependencies (including Qiskit and PyTorch) are described in [`NOTICE`](NOTICE).
+Third-party runtime dependencies (including Qiskit and PyTorch) are described in `[NOTICE](NOTICE)`.
