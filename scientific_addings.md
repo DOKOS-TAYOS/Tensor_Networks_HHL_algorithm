@@ -196,3 +196,7 @@ The numerical revision should make the following distinctions explicit:
 7. The filter does not demonstrate TN speed; it supplies an independent reference for the transformation that TN is intended to realize.
 8. Future work on practical parameter selection should replace exact diagonalization and `A^{-1}b` with spectral bounds or iterative estimates.
 9. The TN-Qiskit timing is an implementation comparison between two classical evaluations of the same finite HHL map, not evidence of quantum advantage or superiority over optimized classical solvers.
+
+## Referee 2 comments 3 and 4: memory and limited scaling
+
+Run `python -m experiments.run_reviewer_r2_c3_c4` to regenerate these results. Qiskit exact-statevector and TN peak RSS are measured in separate spawned processes, without Qiskit sampling, and the reported increment is relative to each worker's post-warm-up RSS. The scaling study is empirical and limited to the declared finite ranges of `N` and `mu`; its log-log slopes are not asymptotic-complexity proofs. The separately timed spectral filter is used only as a numerical validation reference. Finally, the paired Qiskit-TN benchmark compares two classical simulations of the same finite HHL map, not quantum advantage and not performance against classical linear-system solvers.

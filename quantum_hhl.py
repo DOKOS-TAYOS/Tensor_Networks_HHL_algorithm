@@ -274,6 +274,7 @@ def run_qiskit_hhl_once(
     seed_transpiler: int,
     seed_simulator: int,
     threads: int = 1,
+    include_shots: bool = True,
 ) -> dict[str, object]:
     """Run one timed exact simulation and its secondary sampled comparison."""
     if n_shots < 1:
@@ -333,21 +334,26 @@ def run_qiskit_hhl_once(
     exact_probabilities = np.diag(density_matrix).real.copy()
     extraction_seconds = perf_counter() - start
 
-    measured_circuit = add_solution_measurements(
-        transpiled,
-        n_ancillas,
-        n_state_qubits,
-    )
-    start = perf_counter()
-    counts = backend.run(
-        measured_circuit,
-        shots=n_shots,
-        seed_simulator=seed_simulator,
-    ).result().get_counts()
-    shots_seconds = perf_counter() - start
-    sampled_probabilities, successful_shots, success_probability_sampled = (
-        sampled_solution_probabilities(counts, n_state_qubits)
-    )
+    sampled_probabilities: np.ndarray | None = None
+    successful_shots = 0
+    success_probability_sampled: float | None = None
+    shots_seconds = 0.0
+    if include_shots:
+        measured_circuit = add_solution_measurements(
+            transpiled,
+            n_ancillas,
+            n_state_qubits,
+        )
+        start = perf_counter()
+        counts = backend.run(
+            measured_circuit,
+            shots=n_shots,
+            seed_simulator=seed_simulator,
+        ).result().get_counts()
+        shots_seconds = perf_counter() - start
+        sampled_probabilities, successful_shots, success_probability_sampled = (
+            sampled_solution_probabilities(counts, n_state_qubits)
+        )
 
     total_exact_seconds = (
         unitary_seconds
