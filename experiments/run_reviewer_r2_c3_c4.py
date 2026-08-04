@@ -1,4 +1,12 @@
-"""Generate the memory and empirical-scaling results for Referee 2 C3/C4."""
+"""Generate the memory and empirical-scaling results for Referee 2 C3/C4.
+
+TN timing is measured repeatedly after one warm-up in the timing process. Each
+scaling-memory observation instead uses a fresh spawned process with no TN
+warm-up: its RSS baseline is recorded after imports and input preparation but
+before TN runs, peak RSS is the maximum observed RSS, and peak RSS delta is
+``peak - baseline``. Absolute peak RSS should be interpreted together with the
+delta; neither quantity is a theoretical memory-complexity measurement.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +36,11 @@ MEMORY_COLUMNS = (
     "tn_rss_baseline_bytes",
     "tn_peak_rss_bytes",
     "tn_peak_rss_delta_bytes",
+)
+SCALING_LEGACY_MEMORY_COLUMNS = (
+    "rss_baseline_bytes",
+    "peak_rss_bytes",
+    "peak_rss_delta_bytes",
 )
 
 
@@ -139,7 +152,7 @@ def _median_iqr(values: Sequence[float]) -> tuple[float, float, float]:
     )
 
 
-def _scaling_operation(payload: Mapping[str, object]) -> dict[str, object]:
+def _scaling_timing_operation(payload: Mapping[str, object]) -> dict[str, object]:
     import torch
 
     from experiments.parameter_selection import (
@@ -160,33 +173,38 @@ def _scaling_operation(payload: Mapping[str, object]) -> dict[str, object]:
         int(payload["seed"]),
     )
     if not float(np.max(np.abs(tau * constructed_eigenvalues))) < mu / 2.0:
-        raise ValueError(
-            f"aliasing in scaling point N={dimension}, mu={mu}, tau={tau}"
-        )
+        raise ValueError(f"aliasing in scaling point N={dimension}, mu={mu}, tau={tau}")
     matrix_tensor = torch.as_tensor(matrix, dtype=torch.float64)
     rhs_tensor = torch.as_tensor(rhs, dtype=torch.float64)
 
-    start = time.perf_counter()
-    eigenvalues, eigenvectors = np.linalg.eigh(matrix)
-    eigendecomposition_seconds = time.perf_counter() - start
+    filter_total_times: list[float] = []
+    eigendecomposition_times: list[float] = []
+    filter_values_times: list[float] = []
+    filter_application_times: list[float] = []
+    filter_solution = None
+    for _ in range(repetitions):
+        total_start = time.perf_counter()
 
-    start = time.perf_counter()
-    filter_values = hhl_filter(eigenvalues, mu, tau)
-    filter_values_seconds = time.perf_counter() - start
+        start = time.perf_counter()
+        eigenvalues, eigenvectors = np.linalg.eigh(matrix)
+        eigendecomposition_times.append(time.perf_counter() - start)
 
-    start = time.perf_counter()
-    filter_solution = apply_spectral_filter(eigenvectors, rhs, filter_values).real
-    filter_application_seconds = time.perf_counter() - start
+        start = time.perf_counter()
+        filter_values = hhl_filter(eigenvalues, mu, tau)
+        filter_values_times.append(time.perf_counter() - start)
+
+        start = time.perf_counter()
+        filter_solution = apply_spectral_filter(
+            eigenvectors,
+            rhs,
+            filter_values,
+        ).real
+        filter_application_times.append(time.perf_counter() - start)
+        filter_total_times.append(time.perf_counter() - total_start)
 
     warmup = tensornetwork_HHL(mu, tau, rhs_tensor, matrix_tensor)
     del warmup
     gc.collect()
-
-    baseline_rss = psutil.Process().memory_info().rss
-    connection = payload["connection"]
-    start_event = payload["start_event"]
-    connection.send({"stage": "baseline", "rss": baseline_rss})
-    start_event.wait()
 
     total_times: list[float] = []
     unitary_times: list[float] = []
@@ -209,6 +227,7 @@ def _scaling_operation(payload: Mapping[str, object]) -> dict[str, object]:
         contraction_times.append(timings["contraction_seconds"])
 
     assert estimate is not None
+    assert filter_solution is not None
     estimate_array = estimate.detach().cpu().numpy()
     filter_norm = float(np.linalg.norm(filter_solution))
     if filter_norm == 0.0:
@@ -217,6 +236,12 @@ def _scaling_operation(payload: Mapping[str, object]) -> dict[str, object]:
     unitary_median, _, _ = _median_iqr(unitary_times)
     preparation_median, _, _ = _median_iqr(preparation_times)
     contraction_median, _, _ = _median_iqr(contraction_times)
+    filter_total_median, filter_total_q1, filter_total_q3 = _median_iqr(
+        filter_total_times
+    )
+    eigendecomposition_median, _, _ = _median_iqr(eigendecomposition_times)
+    filter_values_median, _, _ = _median_iqr(filter_values_times)
+    filter_application_median, _, _ = _median_iqr(filter_application_times)
     return {
         "sweep": str(payload["sweep"]),
         "N": dimension,
@@ -230,18 +255,47 @@ def _scaling_operation(payload: Mapping[str, object]) -> dict[str, object]:
         "tn_unitary_median_seconds": unitary_median,
         "tn_preparation_median_seconds": preparation_median,
         "tn_contraction_median_seconds": contraction_median,
-        "filter_eigendecomposition_seconds": eigendecomposition_seconds,
-        "filter_values_seconds": filter_values_seconds,
-        "filter_application_seconds": filter_application_seconds,
-        "filter_total_seconds": (
-            eigendecomposition_seconds
-            + filter_values_seconds
-            + filter_application_seconds
-        ),
+        "filter_eigendecomposition_median_seconds": eigendecomposition_median,
+        "filter_values_median_seconds": filter_values_median,
+        "filter_application_median_seconds": filter_application_median,
+        "filter_total_median_seconds": filter_total_median,
+        "filter_total_q1_seconds": filter_total_q1,
+        "filter_total_q3_seconds": filter_total_q3,
         "tn_filter_relative_difference": float(
             np.linalg.norm(estimate_array - filter_solution) / filter_norm
         ),
     }
+
+
+def _scaling_memory_operation(
+    payload: Mapping[str, object],
+    connection: Connection,
+    start_event: Any,
+) -> dict[str, float]:
+    """Measure one TN call after inputs are ready, without a TN warm-up."""
+    import torch
+
+    from tn_hhl import tensornetwork_HHL
+
+    dimension = int(payload["N"])
+    mu = int(payload["mu"])
+    tau = float(payload["tau"])
+    matrix, rhs, constructed_eigenvalues = _build_scaling_problem(
+        dimension,
+        int(payload["seed"]),
+    )
+    if not float(np.max(np.abs(tau * constructed_eigenvalues))) < mu / 2.0:
+        raise ValueError(f"aliasing in scaling point N={dimension}, mu={mu}, tau={tau}")
+    matrix_tensor = torch.as_tensor(matrix, dtype=torch.float64)
+    rhs_tensor = torch.as_tensor(rhs, dtype=torch.float64)
+
+    gc.collect()
+    baseline_rss = psutil.Process().memory_info().rss
+    connection.send({"stage": "baseline", "rss": baseline_rss})
+    start_event.wait()
+
+    result = tensornetwork_HHL(mu, tau, rhs_tensor, matrix_tensor)
+    return {"result_norm": float(torch.linalg.vector_norm(result).item())}
 
 
 def _isolated_worker(
@@ -251,13 +305,8 @@ def _isolated_worker(
     payload: Mapping[str, object],
 ) -> None:
     try:
-        if operation == "scaling":
-            scaling_payload = {
-                **payload,
-                "connection": connection,
-                "start_event": start_event,
-            }
-            result = _scaling_operation(scaling_payload)
+        if operation == "scaling_memory":
+            result = _scaling_memory_operation(payload, connection, start_event)
         else:
             execute = _prepare_comparison_operation(operation, payload)
             warmup = execute()
@@ -268,7 +317,7 @@ def _isolated_worker(
             start_event.wait()
             result = execute()
         connection.send({"stage": "result", "result": result})
-    except BaseException:
+    except Exception:  # noqa: BLE001 - report worker failures to the parent process
         connection.send({"stage": "error", "traceback": traceback.format_exc()})
     finally:
         connection.close()
@@ -437,17 +486,13 @@ def add_comparison_memory_measurements(
                 "qiskit_exact_rss_baseline_bytes": str(
                     qiskit_memory["rss_baseline_bytes"]
                 ),
-                "qiskit_exact_peak_rss_bytes": str(
-                    qiskit_memory["peak_rss_bytes"]
-                ),
+                "qiskit_exact_peak_rss_bytes": str(qiskit_memory["peak_rss_bytes"]),
                 "qiskit_exact_peak_rss_delta_bytes": str(
                     qiskit_memory["peak_rss_delta_bytes"]
                 ),
                 "tn_rss_baseline_bytes": str(tn_memory["rss_baseline_bytes"]),
                 "tn_peak_rss_bytes": str(tn_memory["peak_rss_bytes"]),
-                "tn_peak_rss_delta_bytes": str(
-                    tn_memory["peak_rss_delta_bytes"]
-                ),
+                "tn_peak_rss_delta_bytes": str(tn_memory["peak_rss_delta_bytes"]),
             }
         )
 
@@ -464,17 +509,20 @@ def run_scaling_experiment(
     mu_values: Sequence[int] = (16, 32, 64, 128, 256),
     tau: float = 20.0,
     repetitions: int = 5,
+    memory_repetitions: int = 5,
     seed: int = 12345,
     n_sweep_mu: int = 64,
     mu_sweep_n: int = 32,
 ) -> list[dict[str, object]]:
+    if repetitions < 1:
+        raise ValueError("scaling repetitions must be positive")
+    if memory_repetitions < 1:
+        raise ValueError("scaling memory repetitions must be positive")
+
     points = [
-        {"sweep": "N", "N": int(dimension), "mu": n_sweep_mu}
-        for dimension in n_values
+        {"sweep": "N", "N": int(dimension), "mu": n_sweep_mu} for dimension in n_values
     ]
-    points.extend(
-        {"sweep": "mu", "N": mu_sweep_n, "mu": int(mu)} for mu in mu_values
-    )
+    points.extend({"sweep": "mu", "N": mu_sweep_n, "mu": int(mu)} for mu in mu_values)
     rows: list[dict[str, object]] = []
     for point in points:
         payload = {
@@ -483,8 +531,38 @@ def run_scaling_experiment(
             "repetitions": repetitions,
             "seed": seed,
         }
-        result, memory = _run_isolated("scaling", payload)
-        result.update(memory)
+        result = _scaling_timing_operation(payload)
+        baselines: list[float] = []
+        peaks: list[float] = []
+        deltas: list[float] = []
+        for _ in range(memory_repetitions):
+            _, memory = _run_isolated("scaling_memory", payload)
+            baselines.append(float(memory["rss_baseline_bytes"]))
+            peaks.append(float(memory["peak_rss_bytes"]))
+            deltas.append(float(memory["peak_rss_delta_bytes"]))
+
+        baseline_median, baseline_q1, baseline_q3 = _median_iqr(baselines)
+        peak_median, peak_q1, peak_q3 = _median_iqr(peaks)
+        delta_median, delta_q1, delta_q3 = _median_iqr(deltas)
+        result.update(
+            {
+                "memory_repetitions": memory_repetitions,
+                "tn_rss_baseline_median_bytes": baseline_median,
+                "tn_rss_baseline_q1_bytes": baseline_q1,
+                "tn_rss_baseline_q3_bytes": baseline_q3,
+                "tn_peak_rss_median_bytes": peak_median,
+                "tn_peak_rss_q1_bytes": peak_q1,
+                "tn_peak_rss_q3_bytes": peak_q3,
+                "tn_peak_rss_delta_median_bytes": delta_median,
+                "tn_peak_rss_delta_q1_bytes": delta_q1,
+                "tn_peak_rss_delta_q3_bytes": delta_q3,
+                # Preserve the existing Python API; these aliases are excluded
+                # from the regenerated scaling CSV below.
+                "rss_baseline_bytes": baseline_median,
+                "peak_rss_bytes": peak_median,
+                "peak_rss_delta_bytes": delta_median,
+            }
+        )
         rows.append(result)
     return rows
 
@@ -562,8 +640,7 @@ def build_summary_rows(
     )
 
     target_values = [
-        1.0 if row["parameter_target_met"] == "True" else 0.0
-        for row in comparison_rows
+        1.0 if row["parameter_target_met"] == "True" else 0.0 for row in comparison_rows
     ]
     target_count = int(sum(target_values))
     if target_count != 7 or len(target_values) != 20:
@@ -585,22 +662,22 @@ def build_summary_rows(
         (
             "N",
             "N",
-            "peak_rss_delta_bytes",
-            "loglog_slope_peak_rss_delta_vs_N",
+            "tn_peak_rss_median_bytes",
+            "loglog_slope_tn_peak_rss_vs_N",
         ),
         ("mu", "mu", "tn_total_median_seconds", "loglog_slope_tn_time_vs_mu"),
         (
             "mu",
             "mu",
-            "peak_rss_delta_bytes",
-            "loglog_slope_peak_rss_delta_vs_mu",
+            "tn_peak_rss_median_bytes",
+            "loglog_slope_tn_peak_rss_vs_mu",
         ),
     )
     for sweep, x_key, y_key, metric in slope_specs:
         selected = [row for row in scaling_rows if row["sweep"] == sweep]
         x_values = np.asarray([float(row[x_key]) for row in selected])
         y_values = np.asarray([float(row[y_key]) for row in selected])
-        positive = y_values > 0.0
+        positive = (x_values > 0.0) & (y_values > 0.0)
         if np.count_nonzero(positive) < 2:
             raise ValueError(f"cannot fit {metric}: fewer than two positive values")
         slope = float(
@@ -610,7 +687,9 @@ def build_summary_rows(
             {
                 "section": "scaling",
                 "metric": metric,
-                "method": "empirical least-squares log-log fit",
+                "method": (
+                    "empirical least-squares log-log fit over the tested points"
+                ),
                 "sample_count": int(np.count_nonzero(positive)),
                 "mean": slope,
                 "sample_std": "",
@@ -629,43 +708,57 @@ def _plot_scaling(rows: Sequence[Mapping[str, object]], output_path: Path) -> No
 
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
+    from matplotlib.ticker import NullFormatter
 
     figure, axes = plt.subplots(2, 2, figsize=(8.0, 6.2))
     panels = (
-        ("N", "N", "tn_total_median_seconds", "TN time vs N", True),
-        ("N", "N", "peak_rss_delta_bytes", "Peak RSS delta vs N", False),
-        ("mu", "mu", "tn_total_median_seconds", "TN time vs mu", True),
-        ("mu", "mu", "peak_rss_delta_bytes", "Peak RSS delta vs mu", False),
+        ("N", "N", "tn_total_median_seconds", "TN time vs N", "time"),
+        ("N", "N", "tn_peak_rss_median_bytes", "Peak RSS vs N", "memory"),
+        ("mu", "mu", "tn_total_median_seconds", "TN time vs mu", "time"),
+        ("mu", "mu", "tn_peak_rss_median_bytes", "Peak RSS vs mu", "memory"),
     )
-    for axis, (sweep, x_key, y_key, title, with_iqr) in zip(axes.flat, panels):
+    for axis, (sweep, x_key, y_key, title, measurement) in zip(
+        axes.flat,
+        panels,
+    ):
         selected = [row for row in rows if row["sweep"] == sweep]
         x_values = np.asarray([float(row[x_key]) for row in selected])
         y_values = np.asarray([float(row[y_key]) for row in selected])
-        if with_iqr:
+        if measurement == "time":
             q1 = np.asarray([float(row["tn_total_q1_seconds"]) for row in selected])
             q3 = np.asarray([float(row["tn_total_q3_seconds"]) for row in selected])
-            axis.errorbar(
-                x_values,
-                y_values,
-                yerr=np.vstack((y_values - q1, q3 - y_values)),
-                marker="o",
-                capsize=3,
-            )
         else:
-            positive = y_values > 0.0
-            axis.plot(x_values[positive], y_values[positive], marker="o")
+            bytes_per_mib = 1024.0**2
+            y_values /= bytes_per_mib
+            q1 = np.asarray([float(row["tn_peak_rss_q1_bytes"]) for row in selected])
+            q3 = np.asarray([float(row["tn_peak_rss_q3_bytes"]) for row in selected])
+            q1 /= bytes_per_mib
+            q3 /= bytes_per_mib
+        if np.any(x_values <= 0.0) or np.any(q1 <= 0.0):
+            raise ValueError(f"cannot plot non-positive log-scale values for {title}")
+        axis.errorbar(
+            x_values,
+            y_values,
+            yerr=np.vstack((y_values - q1, q3 - y_values)),
+            marker="o",
+            capsize=3,
+        )
         axis.set_xscale("log")
         axis.set_yscale("log")
+        axis.set_xticks(x_values, labels=[str(int(value)) for value in x_values])
+        axis.xaxis.set_minor_formatter(NullFormatter())
         axis.set(
             xlabel=x_key,
-            ylabel="seconds" if with_iqr else "bytes",
+            ylabel="seconds" if measurement == "time" else "peak RSS (MiB)",
             title=title,
         )
         axis.grid(alpha=0.25, which="both")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = output_path.with_suffix(output_path.suffix + ".tmp")
     figure.savefig(
-        output_path,
+        temporary,
+        format="pdf",
         bbox_inches="tight",
         metadata={
             "Creator": "Tensor_Networks_HHL_algorithm",
@@ -674,6 +767,7 @@ def _plot_scaling(rows: Sequence[Mapping[str, object]], output_path: Path) -> No
         },
     )
     plt.close(figure)
+    temporary.replace(output_path)
 
 
 def run_experiments(
@@ -681,16 +775,23 @@ def run_experiments(
     config_path: Path = DEFAULT_CONFIG,
     comparison_csv: Path = DEFAULT_COMPARISON_CSV,
     output_dir: Path = DEFAULT_OUTPUT,
+    memory_repetitions: int = 5,
 ) -> None:
-    comparison_rows = add_comparison_memory_measurements(
-        comparison_csv,
-        config_path,
+    _, comparison_rows = _read_csv(comparison_csv)
+    config = _load_config(config_path)
+    _validate_comparison_rows(comparison_rows, config)
+    scaling_rows = run_scaling_experiment(
+        memory_repetitions=memory_repetitions,
     )
-    scaling_rows = run_scaling_experiment()
     summary_rows = build_summary_rows(comparison_rows, scaling_rows)
-    scaling_fields = list(scaling_rows[0].keys())
+    scaling_fields = [
+        field for field in scaling_rows[0] if field not in SCALING_LEGACY_MEMORY_COLUMNS
+    ]
+    scaling_csv_rows = [
+        {field: row[field] for field in scaling_fields} for row in scaling_rows
+    ]
     summary_fields = list(summary_rows[0].keys())
-    _write_csv(output_dir / "scaling.csv", scaling_fields, scaling_rows)
+    _write_csv(output_dir / "scaling.csv", scaling_fields, scaling_csv_rows)
     _write_csv(output_dir / "summary.csv", summary_fields, summary_rows)
     _plot_scaling(scaling_rows, output_dir / "scaling.pdf")
 
@@ -700,11 +801,13 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--comparison-csv", type=Path, default=DEFAULT_COMPARISON_CSV)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--memory-repetitions", type=int, default=5)
     args = parser.parse_args()
     run_experiments(
         config_path=args.config,
         comparison_csv=args.comparison_csv,
         output_dir=args.output_dir,
+        memory_repetitions=args.memory_repetitions,
     )
     print(f"Generated Referee 2 C3/C4 results in {args.output_dir}")
 
