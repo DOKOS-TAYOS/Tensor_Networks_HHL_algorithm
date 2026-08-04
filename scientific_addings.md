@@ -143,17 +143,45 @@ For most small random instances the exact selector is also slower than the selec
 
 ## Notebook TN-Qiskit comparison
 
-The executed notebook comparison uses the same 20 deterministic random systems, `n_c=10`, `t=1`, and Qiskit Aer with the statevector simulation method and `100000` shots. It compares normalized output probabilities, not solution vectors. The observed mean probability RMSE values are
+The corrected notebook comparison uses the same 20 deterministic dimension-16 random systems and seed `12345` as the other reviewer experiments. For each instance, the selector is rerun on the predefined binary-register candidates
 
 \[
-\operatorname{RMSE}(p_{\mathrm{TN}},p_{\mathrm{direct}})=7.950\times10^{-3},
-\qquad
-\operatorname{RMSE}(p_{\mathrm{Qiskit}},p_{\mathrm{direct}})=1.801\times10^{-2},
+\mu\in\{128,256,512,1024\}.
 \]
 
-with a mean TN-Qiskit probability RMSE of `2.340e-2`. On the machine used for the saved notebook run, mean execution times were `0.088 s` for TN and `13.591 s` for Qiskit, a ratio of approximately `153.84`. This timing supports the practical value of TN for repeated classically tractable ideal-HHL studies in this particular implementation. It must not be presented as a general quantum-versus-classical speedup: the two code paths have different circuit-construction, transpilation, simulation, sampling, and postselection overheads, and both execute on a classical machine.
+TN and Qiskit then use exactly the same selected `(mu, tau)` and
 
-The per-instance notebook results also reinforce the sensitivity conclusion. The TN probability-RMSE mean is dominated by instances 7 and 14 (`6.070e-2` and `7.116e-2`), which have condition numbers of approximately `174.7` and `469.8`; most other TN probability RMSE values are of order `10^-3`. Reporting only the mean would therefore conceal the dependence on conditioning.
+\[
+U=\exp\left(\frac{2\pi i\tau}{\mu}A\right).
+\]
+
+The physical rotation constant and its finite-bin counterpart are
+
+\[
+C_{\mathrm{phys}}=0.9\min_j|\lambda_j|,
+\qquad
+C_{\mathrm{bin}}=\tau C_{\mathrm{phys}}.
+\]
+
+All selected pairs are non-aliased, no relevant eigenvalue is assigned to the singular bin, and every nonzero-bin rotation satisfies `abs(C_bin/d_tilde) <= 1` without clipping. The stricter rotation-domain requirement means that only 7 of the 20 pairs meet the separate 1% spectral-filter target. This loss of direct-solve accuracy is reported rather than hidden; it does not invalidate the paired implementation comparison.
+
+The primary Qiskit result uses `AerSimulator(method="statevector")` without measurements. After conditioning on the successful rotation ancilla, the phase register is traced out. Fidelity is therefore evaluated between the normalized TN state and the generally mixed reduced Qiskit solution state. The mean and median fidelities are `0.952200` and `0.964896`, respectively; the fidelity IQR is `[0.929390, 0.981097]`. The observed mean probability RMSE values are
+
+\[
+\operatorname{RMSE}(p_{\mathrm{TN}},p_{\mathrm{direct}})=1.515\times10^{-3},
+\qquad
+\operatorname{RMSE}(p_{\mathrm{Qiskit}},p_{\mathrm{direct}})=5.428\times10^{-3},
+\]
+
+with a mean exact TN-Qiskit probability RMSE of `5.328e-3`. The secondary seeded 100,000-shot comparison has a mean sampled-versus-exact RMSE of `3.448e-3`; shot execution is excluded from the primary exact total.
+
+With one warm-up, three measured repetitions, their per-instance medians, complex128 arithmetic, and one CPU thread, the total exact speed ratio has median `72.269x`, IQR `36.278x` (`Q1=45.525x`, `Q3=81.804x`), mean `69.143x`, and sample deviation `30.139x`. TN is faster in all 20 instances.
+
+The total difference is not caused by shots, which are excluded from the primary ratio. The median Qiskit circuit-construction-plus-transpilation time is `0.4700 s`, approximately 65% of its exact total, while median statevector simulation is `0.2440 s`, approximately 34%. Thus construction and transpilation are the largest measured source of the total difference.
+
+No `speedup_core` is reported. TN's tensor-preparation phase performs repeated applications of `U` and `U^{-1}` that Aer performs during statevector execution, so Aer simulation divided only by TN's final contraction is not a like-for-like comparison. The CSV retains every phase timing, sets `speedup_core_valid=False`, and leaves `speedup_core` empty.
+
+These results support a consistent implementation-level speedup for the tested finite HHL map. They do not establish quantum advantage and do not compare TN with optimized classical linear solvers. Both paths are classical: one directly contracts the qudit/TN representation and the other simulates a gate-level circuit with Qiskit Aer. The conclusion is limited to 20 dimension-16 real symmetric systems, `mu <= 1024`, the selected Aer and PyTorch versions, one machine, and the reported single-thread configuration. Residual phase-register entanglement also makes the exact Qiskit solution mixed, so fidelity need not be one even when both paths use identical spectral parameters. Complete per-instance values and phase timings are in `artifacts/reviewer_r1_c7_qiskit_comparison.csv`.
 
 ## Recommended manuscript framing
 
@@ -167,3 +195,4 @@ The numerical revision should make the following distinctions explicit:
 6. The physical examples and 20 selected random instances are complete TN executions.
 7. The filter does not demonstrate TN speed; it supplies an independent reference for the transformation that TN is intended to realize.
 8. Future work on practical parameter selection should replace exact diagonalization and `A^{-1}b` with spectral bounds or iterative estimates.
+9. The TN-Qiskit timing is an implementation comparison between two classical evaluations of the same finite HHL map, not evidence of quantum advantage or superiority over optimized classical solvers.
