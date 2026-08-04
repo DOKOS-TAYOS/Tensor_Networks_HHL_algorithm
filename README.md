@@ -70,7 +70,7 @@ Each section is self-contained and annotated for clarity.
 - `mu` (API names `n_eigen` / `num_eigen`) is the phase-register dimension. It is **not** by itself the spectral resolution.
 - The signed non-aliased spectral range depends on both parameters: $|\lambda| < \mu/(2\tau)$, equivalently $|\tau\lambda| < \mu/2$.
 - `n_c` is used only for a binary phase register with $\mu = 2^{n_c}$. The general tensor implementation does not require $\mu$ to be a power of two.
-- In the quantum-circuit HHL, `C` is the ancilla controlled-rotation scale constant and must satisfy $|C/\lambda_j| \le 1$ for all relevant eigenvalues.
+- In the quantum-circuit HHL, the adaptive experiment rule is $C_{\mathrm{phys}}(\tau)=\eta\min(\lambda_{\min},1/\tau)$ with $0<\eta\leq1$, so $C_{\mathrm{bin}}=\tau C_{\mathrm{phys}}\leq\eta$. The general rotation function still rejects arbitrary constants outside the `arcsin` domain without clipping.
 
 ### Fourier and inversion conventions
 
@@ -121,23 +121,33 @@ Wait for the message `Generated scientific results ...` before opening `tensor_n
 
 The notebook's final sensitivity-analysis cells read `artifacts/reviewer_r1_c5_c6/hyperparameter_sweep.csv`, so running the command first is required. Running the notebook is not required to generate the Reviewer 1 results; it provides the interactive explanations and visualizations. Conversely, the reviewer command does not execute the notebook's original examples or its controlled Qiskit comparison.
 
-`Run All` executes the corrected 20-instance Qiskit-versus-TN comparison. Both implementations use the same selected `(mu, tau)` and the same finite evolution
+The corrected 20-instance Qiskit-versus-TN comparison is generated independently of the notebook with
+
+```bash
+python -m experiments.run_reviewer_r1_c7
+```
+
+Both implementations use the same selected `(mu, tau)` and the same finite evolution
 
 ```text
 U = exp(2*pi*i*tau*A/mu).
 ```
 
-The primary Qiskit result is an exact Aer statevector without measurements. It is conditioned on the successful rotation ancilla and reduced over the phase register. A separate seeded run uses 100,000 shots. One warm-up and three measured repetitions are used per instance, and the resulting one-row-per-instance table is written to `artifacts/reviewer_r1_c7_qiskit_comparison.csv`. On the development machine the complete 20-instance benchmark takes approximately two minutes with the configured single-thread execution. The matrix-product-state backend is not part of this controlled comparison.
+The exact statevector produces two distinct postselections. Conditioning only on ancilla success and tracing out the phase register gives the generally mixed density matrix $\rho_{\mathrm{sys}\mid a=1}$ with probability $p_{a=1}$. Projecting jointly onto ancilla success and clock zero gives the pure state $|x_{a=1,c=0}\rangle$ with probability $p_{a=1,c=0}$. The primary TN comparison is the squared overlap with this pure joint branch. Fidelity against $\rho_{\mathrm{sys}\mid a=1}$, its purity, and probability RMSE are secondary diagnostics. The separate seeded 100,000-shot run is conditioned only on the ancilla and is not presented as a direct TN-state verification.
 
-For this comparison the selector is restricted to the predefined binary-register candidates `mu = 128, 256, 512, 1024`. It uses `C_phys = 0.9*min_j(abs(lambda_j))` and `C_bin = tau*C_phys`, rejects aliasing or assignment to the singular bin, and requires `C_bin <= 1` before constructing any rotation. No clipping is used. These stricter circuit-validity constraints mean that only 7 of the 20 selected pairs meet the separate 1% spectral-filter target; all 20 nevertheless remain valid paired TN-Qiskit comparisons.
+For this comparison the selector uses `mu = 128, 256, 512, 1024, 2048`, 40 logarithmic `tau` values per `mu`, and $\eta=0.9$. It rejects aliasing and insufficient separation from the singular bin and validates every rotation before circuit construction. All 20 selected configurations have right-hand-side relative filter error at most 1%. For fixed `(mu, tau)`, changing $C$ does not change the normalized filter state; it changes only rotation feasibility and success probability. The TN-equivalent joint probability includes StatePreparation's normalization: $C_{\mathrm{phys}}^2\lVert f_{\mu,\tau}(A)b\rVert^2/\lVert b\rVert^2$.
 
 Reviewer 2 comments 3 and 4 add isolated-process memory measurements and a limited empirical scaling study:
 
 ```bash
-python -m experiments.run_reviewer_r2_c3_c4
+python -m experiments.run_reviewer_r2_c3_c4 --refresh-comparison-memory
 ```
 
-Peak RSS is monitored externally for each spawned worker and reported both as an absolute value and as the increment over RSS after warm-up. The scaling results cover only the stated finite ranges of `N` and `mu`; their fitted log-log slopes are empirical observations, not proofs of asymptotic complexity. The independently timed spectral filter is a validation reference. The Qiskit-TN benchmark compares two classical simulations of the same finite HHL map; it establishes neither quantum advantage nor superiority over classical linear solvers.
+The flag explicitly remeasures isolated-process RSS for all 20 Qiskit–TN rows before running the scaling study. Without it, the command requires the comparison CSV to contain complete memory columns. Baseline RSS, absolute peak RSS, and their difference are retained, but the primary empirical memory metric in summaries and figures is the peak increment $\Delta\mathrm{RSS}=\mathrm{RSS}_{\mathrm{peak}}-\mathrm{RSS}_{\mathrm{baseline}}$.
+
+The default $N$ sweep uses `N = 16, 32, 64, 96, 128, 192, 256` at `mu=64`. The default phase-dimension sweep uses `mu = 16, 32, 64, 128, 256, 512, 1024, 2048` at `N=32`; both use `tau=20`, five timing repetitions, and five isolated memory repetitions. Alternative values can be passed with `--n-values`, `--mu-values`, `--n-sweep-mu`, and `--mu-sweep-n`.
+
+The public implementation explicitly materializes `inverse_phase_kickback` with shape $\mu\times N\times N$. Its dense preparation performs repeated matrix–matrix products and therefore includes $O(\mu N^3)$ work. The runner also reports `dominant_tensor_storage_estimate_bytes`, an algebraic estimate for explicitly materialized scientific tensors with dominant storage $O(\mu N^2+\mu^2+N^2)$. This estimate is not measured RSS and excludes temporary allocations internal to LAPACK, BLAS, PyTorch, and `matrix_exp`. The fitted log-log exponents are descriptive observations over the finite measured range, not proofs of asymptotic order. The independently timed spectral filter remains a validation reference.
 
 The oscillator discretizations use 100 intervals and 101 nodes; the two prescribed endpoints leave 99 interior unknowns. The damped system therefore has a 99 by 99 physical matrix and a 198 by 198 Hermitian embedding.
 

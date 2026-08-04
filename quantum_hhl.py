@@ -212,7 +212,7 @@ def HHL_circuit(
     return circuit
 
 
-def conditioned_solution_density_matrix(
+def ancilla_conditioned_density_matrix(
     statevector: np.ndarray,
     n_ancillas: int,
     n_state_qubits: int,
@@ -226,15 +226,39 @@ def conditioned_solution_density_matrix(
     # Qiskit uses little-endian qubit indices: Anc is the least-significant
     # bit, followed by Clock, while State contains the most-significant bits.
     ordered = amplitudes.reshape(2**n_state_qubits, 2**n_ancillas, 2)
-    successful_branch = ordered[:, :, 1]
-    success_probability = float(np.sum(np.abs(successful_branch) ** 2))
-    if not 0.0 < success_probability <= 1.0 + 1e-12:
-        raise ValueError("success probability must lie in (0, 1]")
+    ancilla_branch = ordered[:, :, 1]
+    ancilla_success_probability = float(np.sum(np.abs(ancilla_branch) ** 2))
+    if not 0.0 < ancilla_success_probability <= 1.0 + 1e-12:
+        raise ValueError("ancilla success probability must lie in (0, 1]")
 
     density_matrix = (
-        successful_branch @ successful_branch.conj().T / success_probability
+        ancilla_branch @ ancilla_branch.conj().T / ancilla_success_probability
     )
-    return density_matrix, min(success_probability, 1.0)
+    return density_matrix, min(ancilla_success_probability, 1.0)
+
+
+def ancilla_clock_zero_solution_state(
+    statevector: np.ndarray,
+    n_ancillas: int,
+    n_state_qubits: int,
+) -> tuple[np.ndarray | None, float]:
+    """Extract the normalized ``ancilla=1, clock=0`` Qiskit branch."""
+    amplitudes = np.asarray(statevector, dtype=np.complex128)
+    expected_size = 2 ** (1 + n_ancillas + n_state_qubits)
+    if amplitudes.shape != (expected_size,):
+        raise ValueError(f"statevector must have length {expected_size}")
+
+    # Anc is Qiskit's least-significant bit, followed by Clock; therefore the
+    # joint branch is ordered[:, 0, 1] after grouping State, Clock, Anc.
+    ordered = amplitudes.reshape(2**n_state_qubits, 2**n_ancillas, 2)
+    branch = ordered[:, 0, 1].copy()
+    probability = float(np.vdot(branch, branch).real)
+    if not -1e-12 <= probability <= 1.0 + 1e-12:
+        raise ValueError("ancilla-clock-zero probability must lie in [0, 1]")
+    probability = min(max(probability, 0.0), 1.0)
+    if probability == 0.0:
+        return None, probability
+    return branch / np.sqrt(probability), probability
 
 
 def sampled_solution_probabilities(
@@ -324,19 +348,29 @@ def run_qiskit_hhl_once(
     statevector_seconds = perf_counter() - start
 
     start = perf_counter()
-    density_matrix, success_probability_exact = (
-        conditioned_solution_density_matrix(
+    ancilla_density_matrix, ancilla_success_probability = (
+        ancilla_conditioned_density_matrix(
             statevector,
             n_ancillas,
             n_state_qubits,
         )
     )
-    exact_probabilities = np.diag(density_matrix).real.copy()
+    clock_zero_state, ancilla_clock_zero_probability = (
+        ancilla_clock_zero_solution_state(
+            statevector,
+            n_ancillas,
+            n_state_qubits,
+        )
+    )
+    if clock_zero_state is None:
+        raise ValueError("the ancilla=1, clock=0 branch has zero probability")
+    ancilla_conditioned_probabilities = np.diag(ancilla_density_matrix).real.copy()
+    ancilla_clock_zero_probabilities = np.abs(clock_zero_state) ** 2
     extraction_seconds = perf_counter() - start
 
-    sampled_probabilities: np.ndarray | None = None
-    successful_shots = 0
-    success_probability_sampled: float | None = None
+    sampled_ancilla_conditioned_probabilities: np.ndarray | None = None
+    successful_ancilla_shots = 0
+    sampled_ancilla_success_probability: float | None = None
     shots_seconds = 0.0
     if include_shots:
         measured_circuit = add_solution_measurements(
@@ -351,9 +385,11 @@ def run_qiskit_hhl_once(
             seed_simulator=seed_simulator,
         ).result().get_counts()
         shots_seconds = perf_counter() - start
-        sampled_probabilities, successful_shots, success_probability_sampled = (
-            sampled_solution_probabilities(counts, n_state_qubits)
-        )
+        (
+            sampled_ancilla_conditioned_probabilities,
+            successful_ancilla_shots,
+            sampled_ancilla_success_probability,
+        ) = sampled_solution_probabilities(counts, n_state_qubits)
 
     total_exact_seconds = (
         unitary_seconds
@@ -363,12 +399,19 @@ def run_qiskit_hhl_once(
         + extraction_seconds
     )
     return {
-        "density_matrix": density_matrix,
-        "exact_probabilities": exact_probabilities,
-        "sampled_probabilities": sampled_probabilities,
-        "success_probability_exact": success_probability_exact,
-        "success_probability_sampled": success_probability_sampled,
-        "successful_shots": successful_shots,
+        "ancilla_conditioned_density_matrix": ancilla_density_matrix,
+        "ancilla_conditioned_probabilities": ancilla_conditioned_probabilities,
+        "ancilla_success_probability": ancilla_success_probability,
+        "clock_zero_solution_state": clock_zero_state,
+        "ancilla_clock_zero_probabilities": ancilla_clock_zero_probabilities,
+        "ancilla_clock_zero_probability": ancilla_clock_zero_probability,
+        "sampled_ancilla_conditioned_probabilities": (
+            sampled_ancilla_conditioned_probabilities
+        ),
+        "sampled_ancilla_success_probability": (
+            sampled_ancilla_success_probability
+        ),
+        "successful_ancilla_shots": successful_ancilla_shots,
         "unitary_seconds": unitary_seconds,
         "circuit_seconds": circuit_seconds,
         "transpile_seconds": transpile_seconds,

@@ -4,8 +4,9 @@ TN timing is measured repeatedly after one warm-up in the timing process. Each
 scaling-memory observation instead uses a fresh spawned process with no TN
 warm-up: its RSS baseline is recorded after imports and input preparation but
 before TN runs, peak RSS is the maximum observed RSS, and peak RSS delta is
-``peak - baseline``. Absolute peak RSS should be interpreted together with the
-delta; neither quantity is a theoretical memory-complexity measurement.
+``peak - baseline``. The delta is the primary empirical memory metric; absolute
+peak RSS is retained only as auxiliary context. Neither is a theoretical
+memory-complexity measurement.
 """
 
 from __future__ import annotations
@@ -37,11 +38,26 @@ MEMORY_COLUMNS = (
     "tn_peak_rss_bytes",
     "tn_peak_rss_delta_bytes",
 )
-SCALING_LEGACY_MEMORY_COLUMNS = (
-    "rss_baseline_bytes",
-    "peak_rss_bytes",
-    "peak_rss_delta_bytes",
-)
+DEFAULT_N_VALUES = (16, 32, 64, 96, 128, 192, 256)
+DEFAULT_MU_VALUES = (16, 32, 64, 128, 256, 512, 1024, 2048)
+DEFAULT_TAU = 20.0
+DEFAULT_N_SWEEP_MU = 64
+DEFAULT_MU_SWEEP_N = 32
+
+
+def dominant_tensor_storage_estimate_bytes(dimension: int, mu: int) -> int:
+    """Estimate storage of the dominant tensors explicitly materialized by TN."""
+    if dimension < 1 or mu < 1:
+        raise ValueError("dimension and mu must be positive")
+    complex_elements = (
+        dimension**2  # A_c
+        + dimension  # b_c
+        + 2 * dimension**2  # U and U^{-1}
+        + 3 * mu**2  # QFT, inverse QFT, and inverter
+        + 2 * mu * dimension  # phase_kickback and W
+        + mu * dimension**2  # inverse_phase_kickback
+    )
+    return 16 * complex_elements + 8 * dimension
 
 
 def _load_config(config_path: Path) -> dict[str, object]:
@@ -90,10 +106,10 @@ def _prepare_comparison_operation(
                 threads=int(comparison["threads"]),  # type: ignore[index]
                 include_shots=False,
             )
-            density_matrix = np.asarray(result["density_matrix"])
+            density_matrix = np.asarray(result["ancilla_conditioned_density_matrix"])
             return {
                 "result_norm": float(np.linalg.norm(density_matrix)),
-                "success_probability": float(result["success_probability_exact"]),
+                "success_probability": float(result["ancilla_success_probability"]),
             }
 
         return execute_qiskit
@@ -440,6 +456,24 @@ def _validate_comparison_rows(
 ) -> None:
     from experiments.problem_builders import generate_random_problems
 
+    required_columns = {
+        "fidelity_tn_ancilla_clock_zero",
+        "probability_rmse_tn_ancilla_clock_zero",
+        "ancilla_success_probability",
+        "ancilla_clock_zero_probability",
+        "tn_clock_zero_equivalent_probability",
+        "ancilla_conditioned_purity",
+        "fidelity_tn_ancilla",
+        "probability_rmse_sampled_ancilla_exact",
+        "sampled_ancilla_success_probability",
+        "parameter_target_met",
+    }
+    if not rows:
+        raise ValueError("comparison CSV is empty")
+    missing = required_columns - rows[0].keys()
+    if missing:
+        raise ValueError(f"comparison CSV is missing columns: {sorted(missing)}")
+
     problems = generate_random_problems(_random_config(config))
     if len(rows) != len(problems):
         raise ValueError(
@@ -459,6 +493,45 @@ def _validate_comparison_rows(
                 "comparison CSV does not match regenerated problem at row "
                 f"{expected_instance}: observed={observed}, expected={expected}"
             )
+        if row["parameter_target_met"] != "True":
+            raise ValueError(
+                f"comparison row {expected_instance} does not meet the 1% target"
+            )
+        for column in (
+            "fidelity_tn_ancilla_clock_zero",
+            "ancilla_success_probability",
+            "ancilla_clock_zero_probability",
+            "tn_clock_zero_equivalent_probability",
+            "ancilla_conditioned_purity",
+            "fidelity_tn_ancilla",
+            "sampled_ancilla_success_probability",
+        ):
+            value = float(row[column])
+            if not 0.0 <= value <= 1.0:
+                raise ValueError(
+                    f"comparison row {expected_instance} has {column}={value}"
+                )
+
+
+def _validate_comparison_memory(
+    rows: Sequence[Mapping[str, str]],
+) -> None:
+    """Require complete comparison RSS columns and their defining identities."""
+    missing = set(MEMORY_COLUMNS) - rows[0].keys()
+    if missing:
+        raise ValueError(
+            "comparison memory columns are missing; rerun with "
+            f"--refresh-comparison-memory: {sorted(missing)}"
+        )
+    for index, row in enumerate(rows):
+        for prefix in ("qiskit_exact", "tn"):
+            baseline = int(row[f"{prefix}_rss_baseline_bytes"])
+            peak = int(row[f"{prefix}_peak_rss_bytes"])
+            delta = int(row[f"{prefix}_peak_rss_delta_bytes"])
+            if baseline < 0 or peak < baseline or delta != peak - baseline:
+                raise ValueError(
+                    f"invalid {prefix} RSS values in comparison row {index}"
+                )
 
 
 def add_comparison_memory_measurements(
@@ -495,24 +568,26 @@ def add_comparison_memory_measurements(
                 "tn_peak_rss_delta_bytes": str(tn_memory["peak_rss_delta_bytes"]),
             }
         )
+        print(f"Refreshed comparison RSS for instance {int(row['instance']):02d}")
 
     output_fields = fieldnames + [
         column for column in MEMORY_COLUMNS if column not in fieldnames
     ]
     _write_csv(comparison_csv, output_fields, rows)
+    _validate_comparison_memory(rows)
     return rows
 
 
 def run_scaling_experiment(
     *,
-    n_values: Sequence[int] = (16, 32, 64, 128),
-    mu_values: Sequence[int] = (16, 32, 64, 128, 256),
-    tau: float = 20.0,
+    n_values: Sequence[int] = DEFAULT_N_VALUES,
+    mu_values: Sequence[int] = DEFAULT_MU_VALUES,
+    tau: float = DEFAULT_TAU,
     repetitions: int = 5,
     memory_repetitions: int = 5,
     seed: int = 12345,
-    n_sweep_mu: int = 64,
-    mu_sweep_n: int = 32,
+    n_sweep_mu: int = DEFAULT_N_SWEEP_MU,
+    mu_sweep_n: int = DEFAULT_MU_SWEEP_N,
 ) -> list[dict[str, object]]:
     if repetitions < 1:
         raise ValueError("scaling repetitions must be positive")
@@ -532,6 +607,12 @@ def run_scaling_experiment(
             "seed": seed,
         }
         result = _scaling_timing_operation(payload)
+        result["dominant_tensor_storage_estimate_bytes"] = (
+            dominant_tensor_storage_estimate_bytes(
+                int(point["N"]),
+                int(point["mu"]),
+            )
+        )
         baselines: list[float] = []
         peaks: list[float] = []
         deltas: list[float] = []
@@ -556,14 +637,13 @@ def run_scaling_experiment(
                 "tn_peak_rss_delta_median_bytes": delta_median,
                 "tn_peak_rss_delta_q1_bytes": delta_q1,
                 "tn_peak_rss_delta_q3_bytes": delta_q3,
-                # Preserve the existing Python API; these aliases are excluded
-                # from the regenerated scaling CSV below.
-                "rss_baseline_bytes": baseline_median,
-                "peak_rss_bytes": peak_median,
-                "peak_rss_delta_bytes": delta_median,
             }
         )
         rows.append(result)
+        print(
+            f"Completed scaling point {point['sweep']}: "
+            f"N={int(point['N'])}, mu={int(point['mu'])}"
+        )
     return rows
 
 
@@ -598,20 +678,41 @@ def build_summary_rows(
     scaling_rows: Sequence[Mapping[str, object]],
 ) -> list[dict[str, object]]:
     metrics = (
-        ("fidelity_tn_qiskit", "TN versus exact Qiskit"),
         (
-            "probability_rmse_tn_qiskit_exact",
-            "TN versus exact Qiskit probabilities",
+            "fidelity_tn_ancilla_clock_zero",
+            "TN versus exact Qiskit ancilla-clock-zero branch",
         ),
-        ("probability_rmse_tn_direct", "TN versus direct solve"),
-        ("probability_rmse_qiskit_direct", "exact Qiskit versus direct solve"),
+        ("fidelity_tn_ancilla", "TN versus ancilla-conditioned state"),
         (
-            "probability_rmse_sampled_exact",
-            "sampled Qiskit versus exact Qiskit",
+            "probability_rmse_tn_ancilla_clock_zero",
+            "TN versus exact Qiskit ancilla-clock-zero probabilities",
         ),
-        ("success_probability_exact", "exact Qiskit"),
-        ("success_probability_tn", "TN"),
-        ("success_probability_sampled", "sampled Qiskit"),
+        (
+            "probability_rmse_tn_ancilla",
+            "TN versus ancilla-conditioned probabilities",
+        ),
+        (
+            "probability_rmse_sampled_ancilla_exact",
+            "sampled versus exact ancilla-conditioned Qiskit",
+        ),
+        ("ancilla_success_probability", "exact Qiskit ancilla"),
+        (
+            "ancilla_clock_zero_probability",
+            "exact Qiskit ancilla-clock-zero",
+        ),
+        (
+            "tn_clock_zero_equivalent_probability",
+            "TN clock-zero equivalent",
+        ),
+        (
+            "sampled_ancilla_success_probability",
+            "sampled Qiskit ancilla",
+        ),
+        ("ancilla_conditioned_purity", "ancilla-conditioned density matrix"),
+        (
+            "ancilla_clock_zero_probability_absolute_difference",
+            "absolute Qiskit-TN joint probability difference",
+        ),
         ("qiskit_total_exact_seconds", "exact Qiskit"),
         ("tn_total_seconds", "TN"),
         ("qiskit_exact_peak_rss_delta_bytes", "exact Qiskit"),
@@ -643,9 +744,9 @@ def build_summary_rows(
         1.0 if row["parameter_target_met"] == "True" else 0.0 for row in comparison_rows
     ]
     target_count = int(sum(target_values))
-    if target_count != 7 or len(target_values) != 20:
+    if target_count != 20 or len(target_values) != 20:
         raise ValueError(
-            f"expected exactly 7/20 parameter targets met, got "
+            f"expected exactly 20/20 parameter targets met, got "
             f"{target_count}/{len(target_values)}"
         )
     summary.append(
@@ -662,15 +763,15 @@ def build_summary_rows(
         (
             "N",
             "N",
-            "tn_peak_rss_median_bytes",
-            "loglog_slope_tn_peak_rss_vs_N",
+            "tn_peak_rss_delta_median_bytes",
+            "loglog_slope_tn_peak_rss_delta_vs_N",
         ),
         ("mu", "mu", "tn_total_median_seconds", "loglog_slope_tn_time_vs_mu"),
         (
             "mu",
             "mu",
-            "tn_peak_rss_median_bytes",
-            "loglog_slope_tn_peak_rss_vs_mu",
+            "tn_peak_rss_delta_median_bytes",
+            "loglog_slope_tn_peak_rss_delta_vs_mu",
         ),
     )
     for sweep, x_key, y_key, metric in slope_specs:
@@ -678,19 +779,25 @@ def build_summary_rows(
         x_values = np.asarray([float(row[x_key]) for row in selected])
         y_values = np.asarray([float(row[y_key]) for row in selected])
         positive = (x_values > 0.0) & (y_values > 0.0)
-        if np.count_nonzero(positive) < 2:
-            raise ValueError(f"cannot fit {metric}: fewer than two positive values")
-        slope = float(
-            np.polyfit(np.log(x_values[positive]), np.log(y_values[positive]), 1)[0]
-        )
+        positive_count = int(np.count_nonzero(positive))
+        if positive_count >= 3:
+            slope: float | str = float(
+                np.polyfit(
+                    np.log(x_values[positive]),
+                    np.log(y_values[positive]),
+                    1,
+                )[0]
+            )
+            method = "descriptive least-squares log-log fit over the finite range"
+        else:
+            slope = ""
+            method = "not available: fewer than three strictly positive points"
         summary.append(
             {
                 "section": "scaling",
                 "metric": metric,
-                "method": (
-                    "empirical least-squares log-log fit over the tested points"
-                ),
-                "sample_count": int(np.count_nonzero(positive)),
+                "method": method,
+                "sample_count": positive_count,
                 "mean": slope,
                 "sample_std": "",
                 "median": "",
@@ -713,9 +820,21 @@ def _plot_scaling(rows: Sequence[Mapping[str, object]], output_path: Path) -> No
     figure, axes = plt.subplots(2, 2, figsize=(8.0, 6.2))
     panels = (
         ("N", "N", "tn_total_median_seconds", "TN time vs N", "time"),
-        ("N", "N", "tn_peak_rss_median_bytes", "Peak RSS vs N", "memory"),
+        (
+            "N",
+            "N",
+            "tn_peak_rss_delta_median_bytes",
+            "Peak RSS increment vs N",
+            "memory",
+        ),
         ("mu", "mu", "tn_total_median_seconds", "TN time vs mu", "time"),
-        ("mu", "mu", "tn_peak_rss_median_bytes", "Peak RSS vs mu", "memory"),
+        (
+            "mu",
+            "mu",
+            "tn_peak_rss_delta_median_bytes",
+            "Peak RSS increment vs mu",
+            "memory",
+        ),
     )
     for axis, (sweep, x_key, y_key, title, measurement) in zip(
         axes.flat,
@@ -730,26 +849,55 @@ def _plot_scaling(rows: Sequence[Mapping[str, object]], output_path: Path) -> No
         else:
             bytes_per_mib = 1024.0**2
             y_values /= bytes_per_mib
-            q1 = np.asarray([float(row["tn_peak_rss_q1_bytes"]) for row in selected])
-            q3 = np.asarray([float(row["tn_peak_rss_q3_bytes"]) for row in selected])
+            q1 = np.asarray(
+                [float(row["tn_peak_rss_delta_q1_bytes"]) for row in selected]
+            )
+            q3 = np.asarray(
+                [float(row["tn_peak_rss_delta_q3_bytes"]) for row in selected]
+            )
             q1 /= bytes_per_mib
             q3 /= bytes_per_mib
-        if np.any(x_values <= 0.0) or np.any(q1 <= 0.0):
+        if np.any(x_values <= 0.0):
+            raise ValueError(f"cannot plot non-positive log-scale values for {title}")
+        positive = (y_values > 0.0) & (q1 > 0.0) & (q3 > 0.0)
+        if measurement == "time" and not np.all(positive):
             raise ValueError(f"cannot plot non-positive log-scale values for {title}")
         axis.errorbar(
-            x_values,
-            y_values,
-            yerr=np.vstack((y_values - q1, q3 - y_values)),
+            x_values[positive],
+            y_values[positive],
+            yerr=np.vstack(
+                (
+                    y_values[positive] - q1[positive],
+                    q3[positive] - y_values[positive],
+                )
+            ),
             marker="o",
             capsize=3,
+            label="Measured peak RSS increment" if measurement == "memory" else None,
         )
+        if measurement == "memory":
+            storage_estimate = np.asarray(
+                [
+                    float(row["dominant_tensor_storage_estimate_bytes"]) / bytes_per_mib
+                    for row in selected
+                ]
+            )
+            axis.plot(
+                x_values,
+                storage_estimate,
+                marker="s",
+                linestyle="--",
+                label="Explicit tensor storage estimate",
+            )
+            axis.legend(fontsize=7)
         axis.set_xscale("log")
         axis.set_yscale("log")
         axis.set_xticks(x_values, labels=[str(int(value)) for value in x_values])
+        axis.tick_params(axis="x", labelsize=8, labelrotation=30)
         axis.xaxis.set_minor_formatter(NullFormatter())
         axis.set(
             xlabel=x_key,
-            ylabel="seconds" if measurement == "time" else "peak RSS (MiB)",
+            ylabel=("seconds" if measurement == "time" else "Peak RSS increment (MiB)"),
             title=title,
         )
         axis.grid(alpha=0.25, which="both")
@@ -775,25 +923,48 @@ def run_experiments(
     config_path: Path = DEFAULT_CONFIG,
     comparison_csv: Path = DEFAULT_COMPARISON_CSV,
     output_dir: Path = DEFAULT_OUTPUT,
+    refresh_comparison_memory: bool = False,
+    n_values: Sequence[int] = DEFAULT_N_VALUES,
+    mu_values: Sequence[int] = DEFAULT_MU_VALUES,
+    tau: float = DEFAULT_TAU,
+    repetitions: int = 5,
     memory_repetitions: int = 5,
+    n_sweep_mu: int = DEFAULT_N_SWEEP_MU,
+    mu_sweep_n: int = DEFAULT_MU_SWEEP_N,
 ) -> None:
-    _, comparison_rows = _read_csv(comparison_csv)
+    experiment_start = time.perf_counter()
     config = _load_config(config_path)
+    if refresh_comparison_memory:
+        memory_start = time.perf_counter()
+        comparison_rows = add_comparison_memory_measurements(
+            comparison_csv,
+            config_path,
+        )
+        print(
+            f"Comparison RSS refresh seconds: {time.perf_counter() - memory_start:.3f}"
+        )
+    else:
+        _, comparison_rows = _read_csv(comparison_csv)
     _validate_comparison_rows(comparison_rows, config)
+    _validate_comparison_memory(comparison_rows)
+    scaling_start = time.perf_counter()
     scaling_rows = run_scaling_experiment(
+        n_values=n_values,
+        mu_values=mu_values,
+        tau=tau,
+        repetitions=repetitions,
         memory_repetitions=memory_repetitions,
+        n_sweep_mu=n_sweep_mu,
+        mu_sweep_n=mu_sweep_n,
     )
+    print(f"Scaling benchmark seconds: {time.perf_counter() - scaling_start:.3f}")
     summary_rows = build_summary_rows(comparison_rows, scaling_rows)
-    scaling_fields = [
-        field for field in scaling_rows[0] if field not in SCALING_LEGACY_MEMORY_COLUMNS
-    ]
-    scaling_csv_rows = [
-        {field: row[field] for field in scaling_fields} for row in scaling_rows
-    ]
+    scaling_fields = list(scaling_rows[0])
     summary_fields = list(summary_rows[0].keys())
-    _write_csv(output_dir / "scaling.csv", scaling_fields, scaling_csv_rows)
+    _write_csv(output_dir / "scaling.csv", scaling_fields, scaling_rows)
     _write_csv(output_dir / "summary.csv", summary_fields, summary_rows)
     _plot_scaling(scaling_rows, output_dir / "scaling.pdf")
+    print(f"Referee 2 total seconds: {time.perf_counter() - experiment_start:.3f}")
 
 
 def main() -> None:
@@ -801,13 +972,27 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--comparison-csv", type=Path, default=DEFAULT_COMPARISON_CSV)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--refresh-comparison-memory", action="store_true")
+    parser.add_argument("--n-values", nargs="+", type=int, default=DEFAULT_N_VALUES)
+    parser.add_argument("--mu-values", nargs="+", type=int, default=DEFAULT_MU_VALUES)
+    parser.add_argument("--tau", type=float, default=DEFAULT_TAU)
+    parser.add_argument("--repetitions", type=int, default=5)
     parser.add_argument("--memory-repetitions", type=int, default=5)
+    parser.add_argument("--n-sweep-mu", type=int, default=DEFAULT_N_SWEEP_MU)
+    parser.add_argument("--mu-sweep-n", type=int, default=DEFAULT_MU_SWEEP_N)
     args = parser.parse_args()
     run_experiments(
         config_path=args.config,
         comparison_csv=args.comparison_csv,
         output_dir=args.output_dir,
+        refresh_comparison_memory=args.refresh_comparison_memory,
+        n_values=args.n_values,
+        mu_values=args.mu_values,
+        tau=args.tau,
+        repetitions=args.repetitions,
         memory_repetitions=args.memory_repetitions,
+        n_sweep_mu=args.n_sweep_mu,
+        mu_sweep_n=args.mu_sweep_n,
     )
     print(f"Generated Referee 2 C3/C4 results in {args.output_dir}")
 

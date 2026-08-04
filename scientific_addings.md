@@ -141,12 +141,12 @@ The measured timings also show why calibration must be reported separately. In t
 
 For most small random instances the exact selector is also slower than the selected TN contraction; for the largest selected `mu`, TN becomes comparable or dominant. These measurements support two simultaneous statements: the exact selector is acceptable as offline research calibration, but it is not a credible low-overhead component of a practical end-to-end solver. Timings are machine-dependent and should be taken from the regenerated artifacts when final tables are prepared.
 
-## Notebook TN-Qiskit comparison
+## Reproducible TN-Qiskit comparison
 
-The corrected notebook comparison uses the same 20 deterministic dimension-16 random systems and seed `12345` as the other reviewer experiments. For each instance, the selector is rerun on the predefined binary-register candidates
+Run `python -m experiments.run_reviewer_r1_c7` to regenerate the comparison CSV. The module uses the same 20 deterministic dimension-16 random systems and seed `12345` as the other reviewer experiments. For each instance, the selector evaluates 40 logarithmic values of $\tau$ for every predefined binary-register candidate
 
 \[
-\mu\in\{128,256,512,1024\}.
+\mu\in\{128,256,512,1024,2048\}.
 \]
 
 TN and Qiskit then use exactly the same selected `(mu, tau)` and
@@ -155,33 +155,45 @@ TN and Qiskit then use exactly the same selected `(mu, tau)` and
 U=\exp\left(\frac{2\pi i\tau}{\mu}A\right).
 \]
 
-The physical rotation constant and its finite-bin counterpart are
+With $\lambda_{\min}=\min_j|\lambda_j|$ and $0<\eta\leq1$, the physical rotation constant and its finite-bin counterpart are
 
 \[
-C_{\mathrm{phys}}=0.9\min_j|\lambda_j|,
+C_{\mathrm{phys}}(\tau)=\eta\min\left(\lambda_{\min},\frac{1}{\tau}\right),
 \qquad
-C_{\mathrm{bin}}=\tau C_{\mathrm{phys}}.
+C_{\mathrm{bin}}=\eta\min(\tau\lambda_{\min},1)\leq\eta.
 \]
 
-All selected pairs are non-aliased, no relevant eigenvalue is assigned to the singular bin, and every nonzero-bin rotation satisfies `abs(C_bin/d_tilde) <= 1` without clipping. The stricter rotation-domain requirement means that only 7 of the 20 pairs meet the separate 1% spectral-filter target. This loss of direct-solve accuracy is reported rather than hidden; it does not invalidate the paired implementation comparison.
+with $\eta=0.9$ in the versioned configuration. The value of $C$ affects rotation feasibility and success probability, but for fixed $(\mu,\tau)$ it does not affect the normalized filter state. The filter error and `target_met` therefore remain functions only of $A$, $b$, $\mu$, and $\tau$. Arbitrary invalid constants are still rejected before `arcsin`; no clipping is used.
 
-The primary Qiskit result uses `AerSimulator(method="statevector")` without measurements. After conditioning on the successful rotation ancilla, the phase register is traced out. Fidelity is therefore evaluated between the normalized TN state and the generally mixed reduced Qiskit solution state. The mean and median fidelities are `0.952200` and `0.964896`, respectively; the fidelity IQR is `[0.929390, 0.981097]`. The observed mean probability RMSE values are
+All 20 selected pairs are non-aliased, separated from the zero bin, rotation-valid, and have right-hand-side relative filter error at most 1%. The selected range is $128\leq\mu\leq2048$, and the maximum selected error is `0.009948960230446462`.
+
+The exact Qiskit statevector yields two scientifically distinct objects. Ancilla-only postselection gives
 
 \[
-\operatorname{RMSE}(p_{\mathrm{TN}},p_{\mathrm{direct}})=1.515\times10^{-3},
-\qquad
-\operatorname{RMSE}(p_{\mathrm{Qiskit}},p_{\mathrm{direct}})=5.428\times10^{-3},
+\rho_{\mathrm{sys}\mid a=1}
+=\frac{\operatorname{Tr}_{\mathrm{clock}}[\langle1|_a|\Psi\rangle\langle\Psi|1\rangle_a]}{p_{a=1}}.
 \]
 
-with a mean exact TN-Qiskit probability RMSE of `5.328e-3`. The secondary seeded 100,000-shot comparison has a mean sampled-versus-exact RMSE of `3.448e-3`; shot execution is excluded from the primary exact total.
+which can be mixed after tracing out the clock. Joint projection onto ancilla success and clock zero instead gives the pure normalized state $|x_{a=1,c=0}\rangle$. With Qiskit's little-endian ordering, the statevector is reshaped as `(state_dimension, clock_dimension, 2)` and the unnormalized joint branch is `ordered[:, 0, 1]`.
 
-With one warm-up, three measured repetitions, their per-instance medians, complex128 arithmetic, and one CPU thread, the total exact speed ratio has median `72.269x`, IQR `36.278x` (`Q1=45.525x`, `Q3=81.804x`), mean `69.143x`, and sample deviation `30.139x`. TN is faster in all 20 instances.
+The primary comparison is
 
-The total difference is not caused by shots, which are excluded from the primary ratio. The median Qiskit circuit-construction-plus-transpilation time is `0.4700 s`, approximately 65% of its exact total, while median statevector simulation is `0.2440 s`, approximately 34%. Thus construction and transpilation are the largest measured source of the total difference.
+\[
+F_{\mathrm{TN,joint}}=|\langle x_{\mathrm{TN}}|x_{a=1,c=0}\rangle|^2.
+\]
+
+The regenerated data have minimum joint fidelity `0.9999999999973919`. Because Qiskit `StatePreparation` normalizes $b$, the matching TN joint probability is
+
+\[
+p_{\mathrm{TN,joint}}=C_{\mathrm{phys}}^2
+\frac{\lVert f_{\mu,\tau}(A)b\rVert^2}{\lVert b\rVert^2}.
+\]
+
+Its maximum absolute difference from $p_{a=1,c=0}$ is `8.951472341145461e-10`. Fidelity against $\rho_{\mathrm{sys}\mid a=1}$, its purity, and the corresponding probability RMSE remain secondary diagnostics; the minimum observed purity is `0.7354297226926717`. The seeded 100,000-shot diagnostic is also ancilla-conditioned only and is not a direct verification of the TN pure state.
 
 No `speedup_core` is reported. TN's tensor-preparation phase performs repeated applications of `U` and `U^{-1}` that Aer performs during statevector execution, so Aer simulation divided only by TN's final contraction is not a like-for-like comparison. The CSV retains every phase timing, sets `speedup_core_valid=False`, and leaves `speedup_core` empty.
 
-These results support a consistent implementation-level speedup for the tested finite HHL map. They do not establish quantum advantage and do not compare TN with optimized classical linear solvers. Both paths are classical: one directly contracts the qudit/TN representation and the other simulates a gate-level circuit with Qiskit Aer. The conclusion is limited to 20 dimension-16 real symmetric systems, `mu <= 1024`, the selected Aer and PyTorch versions, one machine, and the reported single-thread configuration. Residual phase-register entanglement also makes the exact Qiskit solution mixed, so fidelity need not be one even when both paths use identical spectral parameters. Complete per-instance values and phase timings are in `artifacts/reviewer_r1_c7_qiskit_comparison.csv`.
+These results support a consistent implementation-level comparison for the tested finite HHL map. They do not establish quantum advantage and do not compare TN with optimized classical linear solvers. Both paths are classical: one directly contracts the qudit/TN representation and the other simulates a gate-level circuit with Qiskit Aer. The conclusion is limited to 20 dimension-16 real symmetric systems, `mu <= 2048`, the selected Aer and PyTorch versions, one machine, and the reported single-thread configuration. Complete per-instance values and phase timings are in `artifacts/reviewer_r1_c7_qiskit_comparison.csv`.
 
 ## Recommended manuscript framing
 
@@ -199,4 +211,32 @@ The numerical revision should make the following distinctions explicit:
 
 ## Referee 2 comments 3 and 4: memory and limited scaling
 
-Run `python -m experiments.run_reviewer_r2_c3_c4` to regenerate these results. For scaling, TN timing uses five repetitions after one warm-up, while each of the five memory observations per point runs in a fresh spawned process without a TN warm-up. The scaling-memory RSS baseline is recorded after imports, problem construction, and input-tensor preparation but before the single TN call; the tables report median and Q1-Q3 for the baseline, absolute peak, and peak-minus-baseline delta. The figure uses the median absolute peak RSS with Q1-Q3 bars. The scaling study is empirical and limited to the declared finite ranges of `N` and `mu`; its slopes are empirical least-squares log-log fits over the tested points, not asymptotic-complexity proofs. The repeatedly timed spectral filter is used only as a numerical validation reference. Finally, the paired Qiskit-TN benchmark compares two classical simulations of the same finite HHL map, not quantum advantage and not performance against classical linear-system solvers.
+Run `python -m experiments.run_reviewer_r2_c3_c4 --refresh-comparison-memory` to remeasure the 20 isolated Qiskit–TN processes and regenerate the scaling artifacts. Without the flag, the runner requires complete RSS columns in the comparison CSV. The Qiskit–TN primary state comparison remains the joint $a=1,c=0$ branch; ancilla-only density-matrix and sampled results remain separately labeled physical diagnostics. All 20 selected parameter pairs satisfy the 1% right-hand-side filter target and the Qiskit candidate range extends through $\mu=2048$.
+
+The scaling defaults are
+
+\[
+N\in\{16,32,64,96,128,192,256\},\quad \mu=64,
+\]
+
+and
+
+\[
+\mu\in\{16,32,64,128,256,512,1024,2048\},\quad N=32,
+\]
+
+with $\tau=20$, five timing repetitions after one warm-up, and five fresh-process memory repetitions. At each memory repetition the baseline is recorded after imports and input preparation but before TN execution. Absolute peak RSS remains auxiliary; the primary empirical memory value is
+
+\[
+\Delta\mathrm{RSS}=\mathrm{RSS}_{\mathrm{peak}}-\mathrm{RSS}_{\mathrm{baseline}}.
+\]
+
+The current public solver constructs `inverse_phase_kickback` with shape $\mu\times N\times N$ by materializing $\mu$ dense $N\times N$ matrix powers. Consequently, its actual dense preparation includes $O(\mu N^3)$ matrix–matrix work. This implementation-level cost must be kept distinct from the complexity of a theoretically optimized TN formulation.
+
+The runner separately reports `dominant_tensor_storage_estimate_bytes`. It counts the explicitly materialized $A_c$, $b_c$, $U$, $U^{-1}$, QFT, inverse QFT, inverter, `phase_kickback`, `inverse_phase_kickback`, $W$, and output using their actual `complex128` or `float64` element sizes. Its dominant terms are
+
+\[
+O(\mu N^2+\mu^2+N^2).
+\]
+
+This is a deterministic storage estimate, not peak RSS. It deliberately excludes temporary allocations and workspaces internal to LAPACK, BLAS, PyTorch, and `matrix_exp`. Figure memory panels use measured $\Delta\mathrm{RSS}$ with Q1–Q3 bars and show the algebraic estimate only as a clearly labeled reference. Log-log slopes use strictly positive deltas, are omitted when fewer than three such points exist, and are descriptive finite-range fits rather than asymptotic-complexity verification. The spectral filter is timed only as a numerical validation reference. Both TN and Aer remain classical simulations; the comparison is not evidence of quantum advantage or superiority over classical linear solvers.

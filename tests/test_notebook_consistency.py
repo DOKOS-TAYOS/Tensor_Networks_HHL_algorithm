@@ -34,10 +34,9 @@ def test_application_and_timing_cells_execute_in_order() -> None:
         34,
         36,
         37,
-        69,
-        70,
-        71,
-        72,
+        66,
+        67,
+        68,
     )
 
     for index in cell_indices:
@@ -89,7 +88,7 @@ def test_matrix_product_state_cells_are_inert_by_default() -> None:
     notebook = json.loads(NOTEBOOK.read_text(encoding="utf-8"))
     shell = InteractiveShell()
 
-    for index in (50, 64, 65, 66):
+    for index in (50,):
         source = "".join(notebook["cells"][index]["source"])
         result = shell.run_cell(source, store_history=False)
         error = result.error_before_exec or result.error_in_exec

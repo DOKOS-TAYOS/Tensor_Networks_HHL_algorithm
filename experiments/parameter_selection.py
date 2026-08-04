@@ -76,7 +76,7 @@ def evaluate_parameter_candidate(
     tau: float,
     zero_bin_separation: float,
     target_rhs_filter_relative_error: float,
-    controlled_rotation_scale: float | None = None,
+    controlled_rotation_safety_factor: float | None = None,
 ) -> dict[str, object]:
     """Evaluate feasibility, filter errors, and TN cost for one candidate."""
     scaled = tau * eigenvalues
@@ -84,11 +84,17 @@ def evaluate_parameter_candidate(
     max_abs_scaled = float(np.max(np.abs(scaled)))
     no_aliasing = max_abs_scaled < mu / 2.0
     separated = min_abs_scaled > zero_bin_separation
-    if controlled_rotation_scale is not None and controlled_rotation_scale <= 0.0:
-        raise ValueError("controlled_rotation_scale must be positive")
+    if controlled_rotation_safety_factor is not None and (
+        not np.isfinite(controlled_rotation_safety_factor)
+        or not 0.0 < controlled_rotation_safety_factor <= 1.0
+    ):
+        raise ValueError(
+            "controlled_rotation_safety_factor must be finite and in (0, 1]"
+        )
+    min_abs_eigenvalue = float(np.min(np.abs(eigenvalues)))
     c_phys = (
-        controlled_rotation_scale * float(np.min(np.abs(eigenvalues)))
-        if controlled_rotation_scale is not None
+        controlled_rotation_safety_factor * min(min_abs_eigenvalue, 1.0 / tau)
+        if controlled_rotation_safety_factor is not None
         else None
     )
     c_bin = tau * c_phys if c_phys is not None else None
@@ -134,7 +140,9 @@ def evaluate_parameter_candidate(
         ),
         "rhs_relative_filter_error": rhs_error,
         "cost_proxy": int(dimension**2 * mu + dimension * mu**2 + mu**3),
-        "target_met": bool(feasible and rhs_error <= target_rhs_filter_relative_error),
+        "target_met": bool(
+            no_aliasing and separated and rhs_error <= target_rhs_filter_relative_error
+        ),
         "selected": False,
         "rejection_reason": rejection_reason,
     }
@@ -197,9 +205,11 @@ def search_parameters(
     safety_factor = float(config["no_aliasing_safety_factor"])
     tau_points = int(config["tau_points_per_mu"])
     target = float(config["target_rhs_filter_relative_error"])
-    rotation_scale_value = config.get("controlled_rotation_scale")
-    controlled_rotation_scale = (
-        float(rotation_scale_value) if rotation_scale_value is not None else None
+    rotation_safety_factor_value = config.get("controlled_rotation_safety_factor")
+    controlled_rotation_safety_factor = (
+        float(rotation_safety_factor_value)
+        if rotation_safety_factor_value is not None
+        else None
     )
     candidates: list[dict[str, object]] = []
 
@@ -220,7 +230,9 @@ def search_parameters(
                     tau=float(tau),
                     zero_bin_separation=zero_separation,
                     target_rhs_filter_relative_error=target,
-                    controlled_rotation_scale=controlled_rotation_scale,
+                    controlled_rotation_safety_factor=(
+                        controlled_rotation_safety_factor
+                    ),
                 )
             )
 
