@@ -15,6 +15,16 @@
     "off_diagonal_density": 0.25,
     "max_condition_number": 10000.0
   },
+  "qiskit_comparison": {
+    "mu_candidates": [128, 256, 512, 1024],
+    "controlled_rotation_scale": 0.9,
+    "shots": 100000,
+    "timing_repetitions": 3,
+    "seed_transpiler": 12345,
+    "seed_simulator": 12345,
+    "threads": 1,
+    "output_csv": "artifacts/reviewer_r1_c7_qiskit_comparison.csv"
+  },
   "hyperparameter_sweep": {
     "tau_values": [0.1, 1.0, 10.0, 50.0, 100.0, 200.0, 500.0, 1000.0, 10000.0],
     "n_c_values": [5, 6, 7, 8, 9, 10, 11, 12, 13],

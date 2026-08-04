@@ -1,5 +1,7 @@
-import torch
+from time import perf_counter
+
 import numpy as np
+import torch
 
 
 def signed_phase_index(d: int, mu: int) -> int:
@@ -223,7 +225,12 @@ def tracer(W_matrix: torch.Tensor, U_matrix: torch.Tensor) -> torch.Tensor:
 
 
 def tensornetwork_HHL(
-    num_eigen: int, t: float, b_vector: torch.Tensor, A_matrix: torch.Tensor
+    num_eigen: int,
+    t: float,
+    b_vector: torch.Tensor,
+    A_matrix: torch.Tensor,
+    *,
+    timings: dict[str, float] | None = None,
 ) -> torch.Tensor:
     """
     Run the tensor-network HHL contraction and return a real-valued solution.
@@ -254,6 +261,9 @@ def tensornetwork_HHL(
         Right-hand side ``b`` (must be effectively real).
     A_matrix : torch.Tensor
         Coefficient matrix ``A`` (must be effectively real).
+    timings : dict[str, float] | None
+        Optional destination for unitary, tensor-preparation, and contraction
+        wall-clock timings. Normalization remains a caller-side benchmark phase.
 
     Returns
     -------
@@ -267,23 +277,42 @@ def tensornetwork_HHL(
     tau = t
     # Keep internal evolution / QFT / contractions in complex128 even when
     # the validated inputs were stored as real tensors.
+    start = perf_counter()
     A_c = A_matrix.to(dtype=torch.complex128)
     b_c = b_vector.to(dtype=torch.complex128)
 
     U_matrix_inv = torch.matrix_exp(-(2j * np.pi * tau / mu) * A_c)
     U_matrix = torch.conj(U_matrix_inv).T
+    unitary_seconds = perf_counter() - start
+
+    start = perf_counter()
+    qft = qft_op(mu, sign=1)
+    inverse_qft = qft_op(mu, sign=-1)
+    inverter = inversor(mu, tau)
+    phase_kickback = phase_kickback_op(b_c, mu, U_matrix)
+    inverse_phase_kickback = phase_kickback_op_inv(mu, U_matrix_inv)
+    preparation_seconds = perf_counter() - start
 
     # Order: F @ ((tau/mu)*G) @ F^† @ phase_kickback  (indices chosen to avoid
     # extra transpositions). F = qft_op(..., sign=+1), F^† = qft_op(..., sign=-1).
+    start = perf_counter()
     W_matrix = torch.matmul(
-        qft_op(mu, sign=1),
+        qft,
         torch.matmul(
-            inversor(mu, tau),
-            torch.matmul(
-                qft_op(mu, sign=-1),
-                phase_kickback_op(b_c, mu, U_matrix),
-            ),
+            inverter,
+            torch.matmul(inverse_qft, phase_kickback),
         ),
     )
     # Keep the real part for the validated real-valued experimental setting.
-    return tracer(W_matrix, phase_kickback_op_inv(mu, U_matrix_inv)).real
+    result = tracer(W_matrix, inverse_phase_kickback).real
+    contraction_seconds = perf_counter() - start
+    if timings is not None:
+        timings.clear()
+        timings.update(
+            {
+                "unitary_seconds": unitary_seconds,
+                "preparation_seconds": preparation_seconds,
+                "contraction_seconds": contraction_seconds,
+            }
+        )
+    return result

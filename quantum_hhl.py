@@ -1,231 +1,432 @@
-import torch
+from __future__ import annotations
+
+from collections.abc import Mapping
+from time import perf_counter
+import warnings
 
 import numpy as np
-from  scipy.linalg import expm
+import torch
+from qiskit import ClassicalRegister, QuantumCircuit, QuantumRegister, transpile
+from qiskit.circuit.library import (
+    StatePreparation,
+    UCRYGate,
+    UnitaryGate,
+    phase_estimation,
+)
+from qiskit_aer import AerSimulator
+from scipy.linalg import expm
+
+from experiments.parameter_selection import signed_phase_indices
 
 
-from qiskit import QuantumCircuit, QuantumRegister, ClassicalRegister, transpile
-from qiskit.circuit.library import phase_estimation, UnitaryGate, RYGate
+def _as_effectively_real_numpy(tensor: torch.Tensor, *, name: str) -> np.ndarray:
+    """Convert a tensor to NumPy after rejecting a genuine imaginary part."""
+    values = tensor.detach().cpu().numpy()
+    if np.iscomplexobj(values):
+        if np.max(np.abs(values.imag)) > 1e-12:
+            raise ValueError(f"{name} must be effectively real")
+        values = values.real
+    return np.asarray(values, dtype=np.float64)
 
 
-def HHL_circuit(n_ancillas: int, b_vector: torch.Tensor, A_matrix: torch.Tensor, t: float, C: float):
+def _padded_hhl_problem(
+    b_vector: torch.Tensor,
+    A_matrix: torch.Tensor,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    """Pad one real linear system to the state-register dimension."""
+    b_values = _as_effectively_real_numpy(b_vector, name="b_vector")
+    matrix = _as_effectively_real_numpy(A_matrix, name="A_matrix")
+    if b_values.ndim != 1:
+        raise ValueError("b_vector must be one-dimensional")
+    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
+        raise ValueError("A_matrix must be square")
+    if matrix.shape[0] != b_values.size:
+        raise ValueError("A_matrix and b_vector dimensions must match")
+    if b_values.size < 2:
+        raise ValueError("b_vector must contain at least two entries")
+
+    n_state_qubits = int(np.ceil(np.log2(b_values.size)))
+    padded_dimension = 2**n_state_qubits
+    b_padded = np.pad(b_values, (0, padded_dimension - b_values.size))
+    A_padded = np.eye(padded_dimension, dtype=np.float64)
+    A_padded[: matrix.shape[0], : matrix.shape[1]] = matrix
+    return b_padded, A_padded, n_state_qubits
+
+
+def build_hhl_unitary(
+    A_matrix: torch.Tensor,
+    tau: float,
+    mu: int,
+) -> np.ndarray:
+    """Build ``U = exp(2*pi*i*tau*A/mu)`` on the padded state space."""
+    if mu < 2 or mu & (mu - 1):
+        raise ValueError("mu must be a power of two")
+    if not np.isfinite(tau) or tau <= 0.0:
+        raise ValueError("tau must be finite and positive")
+
+    dummy_rhs = torch.zeros(A_matrix.shape[0], dtype=torch.float64)
+    _, A_padded, _ = _padded_hhl_problem(dummy_rhs, A_matrix)
+    phase_scale = 2.0 * np.pi * tau / mu
+    return expm(1j * phase_scale * A_padded)
+
+
+def controlled_rotation_angles(
+    mu: int,
+    tau: float,
+    c_phys: float,
+) -> tuple[np.ndarray, float]:
+    """Return signed-bin HHL angles with ``C_bin = tau*C_phys``.
+
+    The singular bin receives angle zero. No clipping is performed: an invalid
+    ``arcsin`` argument raises before circuit construction.
     """
-    Constructs an HHL (Harrow-Hassidim-Lloyd) quantum circuit for solving linear systems Ax = b.
-    
-    This function implements the quantum algorithm for solving systems of linear equations
-    using quantum phase estimation and controlled rotations. The circuit consists of:
-    1. State preparation with input vector b
-    2. Quantum phase estimation to extract eigenvalues
-    3. Controlled rotations based on eigenvalue estimates
-    4. Inverse phase estimation
-    
-    Args:
-        n_ancillas (int): Number of clock qubits for the binary phase register;
-            the phase-register dimension is ``mu = 2**n_ancillas`` (binary ``n_c``).
-        b_vector (torch.Tensor): Input vector b of the linear system Ax = b
-        A_matrix (torch.Tensor): Hermitian matrix A of the linear system (must be square)
-        t (float): Spectral-resolution parameter ``tau`` for the evolution
-            (historical name ``t``). Grid spacing is ``Delta lambda = 1/tau``.
-        C (float): Ancilla controlled-rotation scale constant. Must satisfy
-            ``|C / lambda_j| <= 1`` for all relevant eigenvalues.
-    
-    Returns:
-        QuantumCircuit: Complete HHL quantum circuit ready for execution
-        
-    Note:
-        The circuit automatically pads inputs to power-of-2 dimensions for efficient
-        quantum implementation. The solution vector x is encoded in the final state
-        of the quantum register.
-    """
-    # Determine the number of qubits needed for the state
+    if mu < 2 or mu & (mu - 1):
+        raise ValueError("mu must be a power of two")
+    if not np.isfinite(tau) or tau <= 0.0:
+        raise ValueError("tau must be finite and positive")
+    if not np.isfinite(c_phys) or c_phys <= 0.0:
+        raise ValueError("C_phys must be finite and positive")
+
+    c_bin = tau * c_phys
+    signed_bins = signed_phase_indices(mu)
+    nonzero = signed_bins != 0
+    ratios = np.zeros(mu, dtype=np.float64)
+    ratios[nonzero] = c_bin / signed_bins[nonzero]
+    invalid = nonzero & (np.abs(ratios) > 1.0)
+    if np.any(invalid):
+        invalid_bins = np.flatnonzero(invalid).tolist()
+        raise ValueError(
+            "controlled-rotation domain is invalid for phase bins "
+            f"{invalid_bins}: C_bin={c_bin:.16g}"
+        )
+    return 2.0 * np.arcsin(ratios), float(c_bin)
+
+
+def add_solution_measurements(
+    circuit: QuantumCircuit,
+    n_ancillas: int,
+    n_state_qubits: int,
+) -> QuantumCircuit:
+    """Measure solution qubits and the success ancilla in a parseable order."""
+    measured = circuit.copy()
+    classical = ClassicalRegister(n_state_qubits + 1, "solution_success")
+    measured.add_register(classical)
+    measured.measure(measured.qubits[0], classical[0])
+    state_offset = 1 + n_ancillas
+    for state_qubit in range(n_state_qubits):
+        measured.measure(
+            measured.qubits[state_offset + state_qubit],
+            classical[state_qubit + 1],
+        )
+    return measured
+
+
+def _add_legacy_measurements(
+    circuit: QuantumCircuit,
+    n_ancillas: int,
+    n_state_qubits: int,
+) -> QuantumCircuit:
+    """Preserve the historical ancilla, clock, and state register layout."""
+    measured = circuit.copy()
+    ancilla_bits = ClassicalRegister(1, "canc")
+    clock_bits = ClassicalRegister(n_ancillas, "cClock")
+    state_bits = ClassicalRegister(n_state_qubits, "cState")
+    measured.add_register(ancilla_bits, clock_bits, state_bits)
+    measured.measure(measured.qubits[0], ancilla_bits[0])
+    for clock_qubit in range(n_ancillas):
+        measured.measure(measured.qubits[1 + clock_qubit], clock_bits[clock_qubit])
+    state_offset = 1 + n_ancillas
+    for state_qubit in range(n_state_qubits):
+        measured.measure(
+            measured.qubits[state_offset + state_qubit],
+            state_bits[state_qubit],
+        )
+    return measured
+
+
+def HHL_circuit(
+    n_ancillas: int,
+    b_vector: torch.Tensor,
+    A_matrix: torch.Tensor,
+    tau: float | None = None,
+    c_phys: float | None = None,
+    *,
+    U_matrix: np.ndarray | None = None,
+    measure: bool = True,
+    **legacy_parameters: float,
+) -> QuantumCircuit:
+    """Construct the finite-resolution HHL circuit for a common ``(mu, tau)``."""
+    used_legacy_names = "t" in legacy_parameters or "C" in legacy_parameters
+    if "t" in legacy_parameters:
+        if tau is not None:
+            raise TypeError("specify tau or deprecated t, not both")
+        tau = legacy_parameters.pop("t")
+    if "C" in legacy_parameters:
+        if c_phys is not None:
+            raise TypeError("specify c_phys or deprecated C, not both")
+        c_phys = legacy_parameters.pop("C")
+    if legacy_parameters:
+        unexpected = ", ".join(sorted(legacy_parameters))
+        raise TypeError(f"unexpected HHL parameters: {unexpected}")
+    if tau is None or c_phys is None:
+        raise TypeError("tau and c_phys are required")
+    if used_legacy_names:
+        warnings.warn(
+            "Deprecated t is interpreted as tau (the evolution coefficient is "
+            "2*pi*tau/mu), and deprecated C is interpreted as C_phys.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    mu = 2**n_ancillas
+    b_padded, _, n_state_qubits = _padded_hhl_problem(b_vector, A_matrix)
+    evolution = (
+        build_hhl_unitary(A_matrix, tau, mu)
+        if U_matrix is None
+        else np.asarray(U_matrix, dtype=np.complex128)
+    )
+    expected_shape = (2**n_state_qubits, 2**n_state_qubits)
+    if evolution.shape != expected_shape:
+        raise ValueError(f"U_matrix must have shape {expected_shape}")
+    angles, _ = controlled_rotation_angles(mu, tau, c_phys)
+
+    ancilla_reg = QuantumRegister(1, "Anc")
+    clock_reg = QuantumRegister(n_ancillas, "Clock")
+    state_reg = QuantumRegister(n_state_qubits, "State")
+    circuit = QuantumCircuit(ancilla_reg, clock_reg, state_reg, name="HHL")
+    circuit.append(StatePreparation(b_padded, normalize=True), state_reg)
+
+    qpe = phase_estimation(n_ancillas, UnitaryGate(evolution, label="U"))
+    qpe_qubits = clock_reg[:] + state_reg[:]
+    circuit.append(qpe, qpe_qubits)
+    # Qiskit's QPE presents the logical phase bits in the reverse physical
+    # qubit order expected by UCRYGate's little-endian control-state index.
+    circuit.append(
+        UCRYGate(angles.tolist()),
+        ancilla_reg[:] + list(reversed(clock_reg[:])),
+    )
+    circuit.append(qpe.inverse(), qpe_qubits)
+    circuit = circuit.decompose(["QPE", "QPE_dg"], reps=2)
+
+    if measure:
+        return _add_legacy_measurements(circuit, n_ancillas, n_state_qubits)
+    return circuit
+
+
+def conditioned_solution_density_matrix(
+    statevector: np.ndarray,
+    n_ancillas: int,
+    n_state_qubits: int,
+) -> tuple[np.ndarray, float]:
+    """Condition on ancilla ``1`` and trace out Qiskit's phase register."""
+    amplitudes = np.asarray(statevector, dtype=np.complex128)
+    expected_size = 2 ** (1 + n_ancillas + n_state_qubits)
+    if amplitudes.shape != (expected_size,):
+        raise ValueError(f"statevector must have length {expected_size}")
+
+    # Qiskit uses little-endian qubit indices: Anc is the least-significant
+    # bit, followed by Clock, while State contains the most-significant bits.
+    ordered = amplitudes.reshape(2**n_state_qubits, 2**n_ancillas, 2)
+    successful_branch = ordered[:, :, 1]
+    success_probability = float(np.sum(np.abs(successful_branch) ** 2))
+    if not 0.0 < success_probability <= 1.0 + 1e-12:
+        raise ValueError("success probability must lie in (0, 1]")
+
+    density_matrix = (
+        successful_branch @ successful_branch.conj().T / success_probability
+    )
+    return density_matrix, min(success_probability, 1.0)
+
+
+def sampled_solution_probabilities(
+    counts: Mapping[str, int],
+    n_state_qubits: int,
+) -> tuple[np.ndarray, int, float]:
+    """Postselect sampled counts encoded as ``state_bits + ancilla_bit``."""
+    probabilities = np.zeros(2**n_state_qubits, dtype=np.float64)
+    successful_shots = 0
+    total_shots = 0
+    for raw_key, count in counts.items():
+        key = raw_key.replace(" ", "")
+        if len(key) != n_state_qubits + 1:
+            raise ValueError("unexpected measurement key width")
+        total_shots += int(count)
+        if key[-1] != "1":
+            continue
+        successful_shots += int(count)
+        probabilities[int(key[:-1], 2)] += int(count)
+
+    if total_shots <= 0:
+        raise ValueError("shot counts must be non-empty")
+    if successful_shots <= 0:
+        raise ValueError("no successful ancilla shots were observed")
+    probabilities /= successful_shots
+    return probabilities, successful_shots, successful_shots / total_shots
+
+
+def run_qiskit_hhl_once(
+    *,
+    n_ancillas: int,
+    b_vector: torch.Tensor,
+    A_matrix: torch.Tensor,
+    tau: float,
+    c_phys: float,
+    n_shots: int,
+    seed_transpiler: int,
+    seed_simulator: int,
+    threads: int = 1,
+) -> dict[str, object]:
+    """Run one timed exact simulation and its secondary sampled comparison."""
+    if n_shots < 1:
+        raise ValueError("n_shots must be positive")
+    if threads < 1:
+        raise ValueError("threads must be positive")
+    mu = 2**n_ancillas
     n_state_qubits = int(np.ceil(np.log2(len(b_vector))))
-    # Pad vector b to power of 2 dimensions
-    b_padded = np.concatenate([b_vector.real.numpy(), np.zeros(2**n_state_qubits - len(b_vector))])
-    
-    # Pad matrix A to power of 2 dimensions with identity matrix
-    A_padded = np.eye(2**n_state_qubits)
-    A_padded[:A_matrix.shape[0], :A_matrix.shape[1]] = A_matrix.real.numpy()
-    
-    # Create unitary evolution operator
-    U_matrix = expm(1j * A_padded * t)
-    U_gate = UnitaryGate(U_matrix, label='U')
-    
-    # Define quantum registers
-    ancilla_reg = QuantumRegister(1, 'Anc')
-    clock_reg = QuantumRegister(n_ancillas, 'Clock')
-    state_reg = QuantumRegister(n_state_qubits, 'State')
+    backend = AerSimulator(
+        method="statevector",
+        precision="double",
+        max_parallel_threads=threads,
+    )
 
-    # Define the classical registers
-    crAncilla = ClassicalRegister(1, name='canc')
-    crClock = ClassicalRegister(n_ancillas, name='cClock')
-    crState = ClassicalRegister(n_state_qubits, name='cState')
-    
-    # Create quantum circuit
-    q_circ = QuantumCircuit(ancilla_reg, clock_reg, state_reg, crAncilla, crClock, crState, name='HHL')
-    
-    # Initialize state register with normalized input vector
-    q_circ.initialize(b_padded, state_reg, normalize=True)
-    q_circ.barrier()
-    
-    # Apply Quantum Phase Estimation
-    q_circ.append(phase_estimation(n_ancillas, U_gate), clock_reg[:] + state_reg[:])
-    q_circ.barrier()
+    start = perf_counter()
+    unitary = build_hhl_unitary(A_matrix, tau, mu)
+    unitary_seconds = perf_counter() - start
 
-    # Apply controlled rotation gates for positive eigenvalues
-    for lambda_i in range(1, 2**n_ancillas // 2):
-        # Calculate rotation angle based on eigenvalue
-        theta = 2 * np.arcsin(C / lambda_i)
-        
-        # Convert eigenvalue index to binary representation
-        binary_str = bin(lambda_i)[2:]
-        binary_str = ('0' * (n_ancillas - len(binary_str)) + binary_str)  # Pad with leading zeros
-        
-        # Apply X gates to create appropriate control pattern
-        for j, bit in enumerate(binary_str):
-            if bit == '0':
-                q_circ.x(j + 1)  # +1 to account for ancilla register
-        
-        # Apply controlled rotation gate
-        q_circ.append(RYGate(theta).control(n_ancillas), clock_reg[:] + ancilla_reg[:])
-        
-        # Undo X gates to restore original state
-        for j, bit in enumerate(binary_str):
-            if bit == '0':
-                q_circ.x(j + 1)  # +1 to account for ancilla register
+    start = perf_counter()
+    circuit = HHL_circuit(
+        n_ancillas,
+        b_vector,
+        A_matrix,
+        tau,
+        c_phys,
+        U_matrix=unitary,
+        measure=False,
+    )
+    circuit_seconds = perf_counter() - start
 
-    for lambda_i in range(2**n_ancillas // 2, 2**n_ancillas):  # Negative eigenvalues
-        # Calculate rotation angle based on eigenvalue
-        theta = 2 * np.arcsin(-C / (2**n_ancillas - lambda_i))
-        
-        # Convert eigenvalue index to binary representation
-        binary_str = bin(lambda_i)[2:]
-        binary_str = ('0' * (n_ancillas - len(binary_str)) + binary_str)  # Pad with leading zeros
-        
-        # Apply X gates to create appropriate control pattern
-        for j, bit in enumerate(binary_str):
-            if bit == '0':
-                q_circ.x(j + 1)  # +1 to account for ancilla register
-        
-        # Apply controlled rotation gate
-        q_circ.append(RYGate(theta).control(n_ancillas), clock_reg[:] + ancilla_reg[:])
-        
-        # Undo X gates to restore original state
-        for j, bit in enumerate(binary_str):
-            if bit == '0':
-                q_circ.x(j + 1)  # +1 to account for ancilla register
+    start = perf_counter()
+    transpiled = transpile(
+        circuit,
+        backend,
+        seed_transpiler=seed_transpiler,
+    )
+    transpile_seconds = perf_counter() - start
 
-    q_circ.barrier()
+    exact_circuit = transpiled.copy()
+    exact_circuit.save_statevector()
+    start = perf_counter()
+    exact_result = backend.run(
+        exact_circuit,
+        seed_simulator=seed_simulator,
+    ).result()
+    statevector = np.asarray(exact_result.get_statevector(exact_circuit))
+    statevector_seconds = perf_counter() - start
 
-    # Inverse QPE
-    q_circ.append(phase_estimation(n_ancillas, U_gate).inverse(), clock_reg[:] + state_reg[:])
+    start = perf_counter()
+    density_matrix, success_probability_exact = (
+        conditioned_solution_density_matrix(
+            statevector,
+            n_ancillas,
+            n_state_qubits,
+        )
+    )
+    exact_probabilities = np.diag(density_matrix).real.copy()
+    extraction_seconds = perf_counter() - start
 
-    q_circ.barrier()
-    q_circ.measure(ancilla_reg, crAncilla)
-    q_circ.measure(clock_reg, crClock)
-    q_circ.measure(state_reg, crState)
+    measured_circuit = add_solution_measurements(
+        transpiled,
+        n_ancillas,
+        n_state_qubits,
+    )
+    start = perf_counter()
+    counts = backend.run(
+        measured_circuit,
+        shots=n_shots,
+        seed_simulator=seed_simulator,
+    ).result().get_counts()
+    shots_seconds = perf_counter() - start
+    sampled_probabilities, successful_shots, success_probability_sampled = (
+        sampled_solution_probabilities(counts, n_state_qubits)
+    )
 
-    # We need to decompose QPE to avoid errors
-    qc_desc = q_circ.decompose(['QPE', 'QPE_dg'], reps=2)
-
-    # display(q_circ.draw('mpl'))
-
-    return qc_desc
-
-def original_HHL_solver(n_ancillas: int, b_vector: torch.Tensor, A_matrix: torch.Tensor, t: float, C: float,
-                        n_shots: int, backend):
-    """
-    Execute the HHL algorithm on a simulator backend.
-    
-    Args:
-        n_ancillas: Number of ancilla qubits for phase estimation
-        b_vector: Input vector b in the equation Ax = b
-        A_matrix: Hermitian matrix A in the equation Ax = b
-        t: Time parameter for the evolution
-        C: Normalization constant
-        n_shots: Number of shots for the quantum circuit execution
-        backend: Simulator backend to run the circuit on
-        
-    Returns:
-        torch.Tensor: Vector of probabilities representing the solution
-    """
-    
-    # Create the HHL quantum circuit
-    qc_circ = HHL_circuit(n_ancillas, b_vector, A_matrix, t, C)
-
-    # Transpile the circuit for the target backend
-    qc_transpiled = transpile(qc_circ, backend)
-
-    # Execute the circuit with specified number of shots
-    job = backend.run(qc_transpiled, shots=n_shots)
-    
-    # Get measurement results
-    counts = job.result().get_counts()
-    
-    # Calculate number of state qubits
-    n_state = int(np.ceil(np.log2(len(b_vector))))
-
-    # Extract successful measurements (ancilla qubit = '1')
-    success_counts = {key[:-2]: counts[key] for key in counts if key[-1] == '1'}
-    
-    # Initialize probability dictionary for all possible states
-    x_state = {}
-    for i in range(2**n_state): # Start by initializing the keys
-        binary = bin(i)[2:]
-        binary = '0'*(n_state-len(binary)) + binary
-        x_state[binary] = 0
-
-    for i in range(2**n_state): # Sum all that match
-        binary = bin(i)[2:]
-        binary = '0'*(n_state-len(binary)) + binary
-        x_state[binary] += sum([ success_counts[key] for key in success_counts if key[:n_state] == binary ])
-    
-    # Normalize probabilities
-    total_sum = sum(x_state.values())
-    if total_sum > 0:
-        x_state = {key: value / total_sum for key, value in x_state.items()}
-
-    # display(plot_histogram(x_state))
-
-    # Convert x_state dictionary to a vector of probabilities
-    probabilities = []
-    for i in range(2**n_state):
-        binary = bin(i)[2:]
-        binary = '0'*(n_state-len(binary)) + binary
-        probabilities.append(x_state[binary])
-    probabilities = torch.tensor(probabilities, dtype=torch.float64)
-    return probabilities
+    total_exact_seconds = (
+        unitary_seconds
+        + circuit_seconds
+        + transpile_seconds
+        + statevector_seconds
+        + extraction_seconds
+    )
+    return {
+        "density_matrix": density_matrix,
+        "exact_probabilities": exact_probabilities,
+        "sampled_probabilities": sampled_probabilities,
+        "success_probability_exact": success_probability_exact,
+        "success_probability_sampled": success_probability_sampled,
+        "successful_shots": successful_shots,
+        "unitary_seconds": unitary_seconds,
+        "circuit_seconds": circuit_seconds,
+        "transpile_seconds": transpile_seconds,
+        "statevector_seconds": statevector_seconds,
+        "extraction_seconds": extraction_seconds,
+        "shots_seconds": shots_seconds,
+        "total_exact_seconds": total_exact_seconds,
+    }
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def original_HHL_solver(
+    n_ancillas: int,
+    b_vector: torch.Tensor,
+    A_matrix: torch.Tensor,
+    tau: float | None = None,
+    c_phys: float | None = None,
+    n_shots: int | None = None,
+    backend: AerSimulator | None = None,
+    *,
+    seed_transpiler: int = 12345,
+    seed_simulator: int = 12345,
+    **legacy_parameters: float,
+) -> torch.Tensor:
+    """Execute the secondary sampled HHL comparison with fixed seeds."""
+    used_legacy_names = "t" in legacy_parameters or "C" in legacy_parameters
+    if "t" in legacy_parameters:
+        if tau is not None:
+            raise TypeError("specify tau or deprecated t, not both")
+        tau = legacy_parameters.pop("t")
+    if "C" in legacy_parameters:
+        if c_phys is not None:
+            raise TypeError("specify c_phys or deprecated C, not both")
+        c_phys = legacy_parameters.pop("C")
+    if legacy_parameters:
+        unexpected = ", ".join(sorted(legacy_parameters))
+        raise TypeError(f"unexpected HHL parameters: {unexpected}")
+    if tau is None or c_phys is None or n_shots is None or backend is None:
+        raise TypeError("tau, c_phys, n_shots, and backend are required")
+    if used_legacy_names:
+        warnings.warn(
+            "Deprecated t is interpreted as tau (the evolution coefficient is "
+            "2*pi*tau/mu), and deprecated C is interpreted as C_phys.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    circuit = HHL_circuit(
+        n_ancillas,
+        b_vector,
+        A_matrix,
+        tau,
+        c_phys,
+        measure=False,
+    )
+    transpiled = transpile(circuit, backend, seed_transpiler=seed_transpiler)
+    measured = add_solution_measurements(
+        transpiled,
+        n_ancillas,
+        int(np.ceil(np.log2(len(b_vector)))),
+    )
+    counts = backend.run(
+        measured,
+        shots=n_shots,
+        seed_simulator=seed_simulator,
+    ).result().get_counts()
+    n_state_qubits = int(np.ceil(np.log2(len(b_vector))))
+    probabilities, _, _ = sampled_solution_probabilities(counts, n_state_qubits)
+    return torch.from_numpy(probabilities)

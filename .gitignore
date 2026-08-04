@@ -1,6 +1,7 @@
 .venv/
 __pycache__/
 tmp/
-artifacts/
+artifacts/*
+!artifacts/reviewer_r1_c7_qiskit_comparison.csv
 .pytest_cache/
 .ruff_cache/

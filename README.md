@@ -122,7 +122,15 @@ Wait for the message `Generated scientific results ...` before opening `tensor_n
 
 The notebook's final sensitivity-analysis cells read `artifacts/reviewer_r1_c5_c6/hyperparameter_sweep.csv`, so running the command first is required. Running the notebook is not required to generate the Reviewer 1 results; it provides the interactive explanations and visualizations. Conversely, the reviewer command does not execute the notebook's original examples or its controlled Qiskit comparison.
 
-`Run All` does execute the Qiskit statevector examples and the 20-instance Qiskit-versus-TN comparison with 100,000 shots. This normally adds several minutes; a representative instance takes approximately 12-15 seconds in the development environment. The `matrix_product_state` examples remain commented out because that backend is intentionally retained only for optional manual experimentation with its impractically long runtime.
+`Run All` executes the corrected 20-instance Qiskit-versus-TN comparison. Both implementations use the same selected `(mu, tau)` and the same finite evolution
+
+```text
+U = exp(2*pi*i*tau*A/mu).
+```
+
+The primary Qiskit result is an exact Aer statevector without measurements. It is conditioned on the successful rotation ancilla and reduced over the phase register. A separate seeded run uses 100,000 shots. One warm-up and three measured repetitions are used per instance, and the resulting one-row-per-instance table is written to `artifacts/reviewer_r1_c7_qiskit_comparison.csv`. On the development machine the complete 20-instance benchmark takes approximately two minutes with the configured single-thread execution. The matrix-product-state backend is not part of this controlled comparison.
+
+For this comparison the selector is restricted to the predefined binary-register candidates `mu = 128, 256, 512, 1024`. It uses `C_phys = 0.9*min_j(abs(lambda_j))` and `C_bin = tau*C_phys`, rejects aliasing or assignment to the singular bin, and requires `C_bin <= 1` before constructing any rotation. No clipping is used. These stricter circuit-validity constraints mean that only 7 of the 20 selected pairs meet the separate 1% spectral-filter target; all 20 nevertheless remain valid paired TN-Qiskit comparisons.
 
 The oscillator discretizations use 100 intervals and 101 nodes; the two prescribed endpoints leave 99 interior unknowns. The damped system therefore has a 99 by 99 physical matrix and a 198 by 198 Hermitian embedding.
 
