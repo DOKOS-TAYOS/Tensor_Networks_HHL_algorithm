@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: If you use this software or the associated paper, please cite it using these metadata.
-title: "Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective"
+title: "Simulating the finite-resolution HHL spectral filter with tensor networks and qudits"
 type: software
 authors:
   - family-names: Mata Ali
@@ -10,14 +10,12 @@ license: MIT
 repository-code: "https://github.com/DOKOS-TAYOS/Tensor_Networks_HHL_algorithm"
 url: "https://arxiv.org/abs/2309.05290"
 abstract: >-
-  This work presents a new approach for simulating the HHL linear systems of
-  equations solver algorithm with tensor networks. First, a novel HHL in the
-  qudits formalism, the generalization of qubits, is developed, and then its
-  operations are transformed into an equivalent classical HHL, taking advantage
-  of the non-unitary operations that they can apply. The main novelty of this
-  proposal is to perform a classical simulation of the HHL as efficiently as
-  possible to benchmark the algorithm steps according to its input parameters
-  and the input matrix.
+  This software formulates HHL with qudits and simulates its finite-resolution
+  spectral filter using tensor networks. It evaluates the joint postselected
+  branch conditioned on ancilla success and a zero-valued phase register,
+  studies behaviour both on and off the exact spectral grid, and treats the
+  success probability separately. It is intended for validation and
+  benchmarking of this finite-resolution procedure.
 keywords:
   - HHL
   - tensor networks
@@ -44,7 +42,7 @@ preferred-citation:
       given-names: Aitor
     - family-names: Romero
       given-names: Sebastián V.
-  title: "Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective"
+  title: "Simulating the finite-resolution HHL spectral filter with tensor networks and qudits"
   year: 2023
   month: 9
   doi: 10.48550/arXiv.2309.05290

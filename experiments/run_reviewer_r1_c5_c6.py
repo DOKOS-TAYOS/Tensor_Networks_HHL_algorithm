@@ -161,13 +161,11 @@ def mean_statistics(
 
 
 def log_scale_confidence_errors(
-    means: np.ndarray, lows: np.ndarray, highs: np.ndarray
-) -> tuple[np.ndarray, np.ndarray]:
-    """Build asymmetric error bars, omitting lower arms that cannot be logged."""
-    omitted = lows <= 0
-    lower_errors = np.where(omitted, 0.0, means - lows)
-    upper_errors = highs - means
-    return np.vstack((lower_errors, upper_errors)), omitted
+    means: np.ndarray, lows: np.ndarray, highs: np.ndarray, plot_floor: float
+) -> np.ndarray:
+    """Build asymmetric error bars with lower bounds clipped to the plot floor."""
+    clipped_lows = np.maximum(lows, plot_floor)
+    return np.vstack((means - clipped_lows, highs - means))
 
 
 def _measure_time(
@@ -267,10 +265,11 @@ def _plot_oscillator(
     t_nodes: np.ndarray,
     reference: np.ndarray,
     estimate: np.ndarray,
-    title: str,
 ) -> None:
     figure, axis = plt.subplots(figsize=(9, 5.4))
-    axis.plot(t_nodes, reference, color="tab:blue", linewidth=2.3, label="Direct solve")
+    axis.plot(
+        t_nodes, reference, color="tab:blue", linewidth=2.3, label="pytorch solution"
+    )
     axis.plot(
         t_nodes,
         estimate,
@@ -280,8 +279,7 @@ def _plot_oscillator(
         markersize=5,
         label="TN HHL",
     )
-    axis.set(xlabel="t", ylabel="x(t)", title=title)
-    axis.grid(alpha=0.25)
+    axis.set(xlabel="t", ylabel="x(t)")
     axis.legend()
     _save_figure(figure, path)
 
@@ -295,7 +293,7 @@ def _plot_heat(
     figure, axis = plt.subplots(figsize=(9, 5.4))
     coordinate = np.arange(estimate.size, dtype=float) * float(params["dxy"])
     axis.plot(
-        coordinate, reference, color="tab:blue", linewidth=1.5, label="Direct solve"
+        coordinate, reference, color="tab:blue", linewidth=1.5, label="pytorch solution"
     )
     axis.plot(
         coordinate,
@@ -309,9 +307,7 @@ def _plot_heat(
     axis.set(
         xlabel="Flattened grid coordinate",
         ylabel="Temperature",
-        title="Two-dimensional static heat equation",
     )
-    axis.grid(alpha=0.2)
     axis.legend()
     _save_figure(figure, output_dir / "C2D")
 
@@ -325,12 +321,11 @@ def _plot_heat(
     full[-1, 0] = 0.5 * (float(params["u2x"]) + float(params["u1y"]))
     full[-1, -1] = 0.5 * (float(params["u2x"]) + float(params["u2y"]))
     figure, axis = plt.subplots(figsize=(7.5, 6.0))
-    image = axis.pcolormesh(full, cmap="CMRmap", shading="auto")
+    image = axis.imshow(full, cmap="CMRmap", origin="lower", interpolation="nearest")
     figure.colorbar(image, ax=axis, label="Temperature")
     axis.set(
         xlabel="y grid index",
         ylabel="x grid index",
-        title="TN HHL heat solution with prescribed boundaries",
     )
     _save_figure(figure, output_dir / "C2D_2D")
 
@@ -462,7 +457,6 @@ def _application_experiments(
         harmonic["grid"]["t_nodes"],
         reconstruct_with_boundaries(harmonic_reference, harmonic["x0"], harmonic["xT"]),
         reconstruct_with_boundaries(harmonic_estimate, harmonic["x0"], harmonic["xT"]),
-        "Forced harmonic oscillator (100 intervals, 99 interior unknowns)",
     )
 
     (
@@ -494,7 +488,6 @@ def _application_experiments(
         damped["grid"]["t_nodes"],
         reconstruct_with_boundaries(damped_reference, damped["x0"], damped["xT"]),
         reconstruct_with_boundaries(damped_estimate, damped["x0"], damped["xT"]),
-        "Forced damped oscillator (198-dimensional Hermitian embedding)",
     )
 
     (
@@ -746,7 +739,6 @@ def _plot_sweep(
     all_means = np.array([float(row["rmse_mean"]) for row in rows])
     plot_floor = 0.05 * float(np.min(all_means))
     figure, axis = plt.subplots(figsize=(9, 6.5))
-    omitted_lower_count = 0
     for n_c in n_c_values:
         means = np.array([float(lookup[(n_c, tau)]["rmse_mean"]) for tau in tau_values])
         lows = np.array(
@@ -761,8 +753,7 @@ def _plot_sweep(
                 for tau in tau_values
             ]
         )
-        errors, omitted = log_scale_confidence_errors(means, lows, highs)
-        omitted_lower_count += int(np.count_nonzero(omitted))
+        errors = log_scale_confidence_errors(means, lows, highs, plot_floor)
         error_bars = axis.errorbar(
             tau_values,
             means,
@@ -792,17 +783,7 @@ def _plot_sweep(
     axis.set(
         xlabel=r"$\tau$",
         ylabel="Mean RMSE",
-        title="Error bars: two-sided 95% Student-t confidence interval for the mean",
     )
-    axis.text(
-        0.01,
-        0.01,
-        f"Lower arms omitted for {omitted_lower_count}/{len(rows)} intervals whose "
-        "lower bound is nonpositive; CSV values are exact. Crosses mark aliasing.",
-        transform=axis.transAxes,
-        fontsize=8,
-    )
-    axis.grid(alpha=0.2, which="both")
     axis.legend(fontsize=8, ncol=2)
     _save_figure(figure, output_dir / "rmse_vs_tau")
 
@@ -837,16 +818,7 @@ def _plot_sweep(
     axis.set(
         xlabel=r"$n_c$ ($\mu=2^{n_c}$)",
         ylabel="Mean RMSE",
-        title="Error bars: two-sided 95% Student-t confidence interval for the mean",
     )
-    axis.text(
-        0.01,
-        0.01,
-        "Nonpositive lower bounds are clipped to the plot floor; CSV values are exact.",
-        transform=axis.transAxes,
-        fontsize=8,
-    )
-    axis.grid(alpha=0.2, which="both")
     axis.legend(fontsize=7, ncol=2)
     _save_figure(figure, output_dir / "rmse_vs_num_anc")
 

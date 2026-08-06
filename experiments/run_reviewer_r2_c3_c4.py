@@ -900,7 +900,6 @@ def _plot_scaling(rows: Sequence[Mapping[str, object]], output_path: Path) -> No
             ylabel=("seconds" if measurement == "time" else "Peak RSS increment (MiB)"),
             title=title,
         )
-        axis.grid(alpha=0.25, which="both")
     figure.tight_layout()
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary = output_path.with_suffix(output_path.suffix + ".tmp")

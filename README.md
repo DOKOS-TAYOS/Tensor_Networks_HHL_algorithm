@@ -12,7 +12,7 @@ This repository accompanies the work presented in the paper:
 
 It can be consulted online in the Streamlit webpage: [https://tensornetworks-hhl-algorithm.streamlit.app/](https://tensornetworks-hhl-algorithm.streamlit.app/)
 
-The project implements a classical simulation of the quantum Harrow-Hassidim-Lloyd (HHL) algorithm using tensor networks and qudit formalism. The goal is to provide a quantum-inspired solver that models the ideal behavior of HHL efficiently on classical hardware, enabling benchmarking and theoretical lower-bound estimations.
+The project simulates, using tensor networks and qudit formalism, the finite-resolution HHL spectral filter. Its principal output is the joint postselected branch conditioned on a successful ancilla and a zero-valued phase register; the success probability is calculated and analysed separately. The repository supports validation, benchmarking, and methodological analysis of this finite-resolution procedure. It is not presented as a general classical solver for linear systems or as a competitor to general classical solvers.
 
 ---
 
@@ -22,12 +22,18 @@ The project implements a classical simulation of the quantum Harrow-Hassidim-Llo
 
 ---
 
-## Requirements
+## Environments
 
-Install the dependencies with:
+`requirements.txt` is only for the Streamlit application:
 
 ```bash
-pip install numpy matplotlib scipy torch qiskit qiskit_ibm_runtime qiskit_aer
+pip install -r requirements.txt
+```
+
+For experiments, generated artefacts, Qiskit comparisons, memory measurements, and tests, install:
+
+```bash
+pip install -r requirements_experiments.txt
 ```
 
 The notebook is compatible with standard Python 3.x and requires no GPU. All computations were tested on CPU.
@@ -60,9 +66,9 @@ Each section is self-contained and annotated for clarity.
 
 ## Summary of the Algorithm
 
-- The notebook encodes the HHL quantum circuit using tensor networks.
-- It implements all gates (QPE, inversion, unitaries) as tensor contractions.
-- The tensor-network contraction deterministically evaluates the joint postselected branch and its associated probability; it does not remove the postselection condition of HHL.
+- The notebook encodes the finite-resolution HHL spectral filter using tensor networks.
+- It implements the relevant QPE, inversion, and unitary tensor contractions.
+- The tensor-network contraction deterministically evaluates the branch jointly postselected on ancilla success and phase-register zero. Its success probability is calculated and analysed separately; it does not remove HHL's postselection condition.
 
 ### Parameter conventions
 
@@ -80,7 +86,7 @@ Each section is self-contained and annotated for clarity.
 
 ### Real-valued experimental scope
 
-The numerical experiments accompanying the current paper use real-valued matrices and right-hand sides. The present public implementation returns real-valued solution vectors and has been validated only for this real-valued benchmark setting. The underlying tensor-network formulation is **not** restricted to real systems. Supporting genuinely complex-valued inputs would require retaining the complete complex output and using phase-aware validation metrics.
+The numerical experiments accompanying the current paper use real-valued matrices and right-hand sides. The public implementation has been validated for the real systems used in the paper's experiments. For genuinely complex inputs, it would be necessary to retain the complex output and use validation metrics that are sensitive to phase.
 
 ---
 
@@ -90,18 +96,17 @@ The notebook contains the explanatory examples and the original interactive work
 
 ### Reproducing the reviewer-1 spectral and discretization diagnostics
 
-Run the following commands from the project root. On the first execution in Windows PowerShell, activate the virtual environment and install the additional dependencies:
+Run the following commands from the project root. First, activate the virtual environment and install the experiment environment:
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-python -m pip install -r requirements.txt -r requirements_experiments.txt
+python -m pip install -r requirements_experiments.txt
 ```
 
 On Linux or macOS, use:
 
 ```bash
 source .venv/bin/activate
-python -m pip install -r requirements.txt
 python -m pip install -r requirements_experiments.txt
 ```
 
@@ -158,6 +163,12 @@ Random matrices use the fixed seed 12345. Sensitivity figures show two-sided 95%
 The benchmark-oracle selection cost is approximately `O(N^3 + sum_c(N*mu_c + N^2))` for the evaluated candidates, including the eigendecomposition. This calibration cost is distinct from the fixed-parameter TN contraction cost and must be included separately in any end-to-end runtime discussion. See `[scientific_addings.md](scientific_addings.md)` for the scientific interpretation and manuscript-facing caveats.
 
 The versioned Python modules and the reviewer command above are the authoritative source for these additional diagnostics.
+
+### Running the tests
+
+```bash
+pytest -q
+```
 
 ---
 

@@ -177,12 +177,12 @@ def test_metrics_and_spectral_diagnostics_match_hand_calculations() -> None:
     assert diagnostics["no_aliasing"]
 
 
-def test_log_confidence_errors_omit_nonpositive_lower_arms() -> None:
-    errors, omitted = log_scale_confidence_errors(
+def test_log_confidence_errors_clip_nonpositive_lower_arms() -> None:
+    errors = log_scale_confidence_errors(
         means=np.array([1.0, 2.0, 3.0]),
         lows=np.array([0.5, 0.0, -1.0]),
         highs=np.array([1.5, 3.0, 5.0]),
+        plot_floor=0.2,
     )
 
-    np.testing.assert_allclose(errors, [[0.5, 0.0, 0.0], [0.5, 1.0, 2.0]])
-    assert omitted.tolist() == [False, True, True]
+    np.testing.assert_allclose(errors, [[0.5, 1.8, 2.8], [0.5, 1.0, 2.0]])
