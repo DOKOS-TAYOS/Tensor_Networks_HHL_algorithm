@@ -2,12 +2,12 @@
 
 ## Project Title
 
-**Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective**
+**Simulating the finite-resolution HHL spectral filter with tensor networks and qudits**
 
 This repository accompanies the work presented in the paper:
 
-> **"Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective"**
-> Alejandro Mata Ali and Iñigo Perez Delgado and Marina Ristol Roura and Aitor Moreno Fdez. de Leceta and Sebastián V. Romero (2025)
+> **"Simulating the finite-resolution HHL spectral filter with tensor networks and qudits"**
+> Alejandro Mata Ali and Iñigo Perez Delgado and Marina Ristol Roura and Aitor Moreno Fdez. de Leceta and Sebastián V. Romero (2023)
 > [arXiv:2309.05290](https://arxiv.org/abs/2309.05290)
 
 It can be consulted online in the Streamlit webpage: [https://tensornetworks-hhl-algorithm.streamlit.app/](https://tensornetworks-hhl-algorithm.streamlit.app/)
@@ -174,13 +174,13 @@ pytest -q
 
 ## Reference
 
-If you use this code, please cite the original paper (also encoded in `[CITATION.cff](CITATION.cff)`):
+If you use this code, please cite the associated manuscript (also encoded in `[CITATION.cff](CITATION.cff)`):
 
 ```bibtex
-@misc{ali2024solvingsystemslinearequations,
-      title={Solving Systems of Linear Equations: HHL from a Tensor Networks Perspective}, 
+@misc{mataali2023simulating,
+      title={Simulating the finite-resolution HHL spectral filter with tensor networks and qudits},
       author={Alejandro Mata Ali and Iñigo Perez Delgado and Marina Ristol Roura and Aitor Moreno Fdez. de Leceta and Sebastián V. Romero},
-      year={2024},
+      year={2023},
       eprint={2309.05290},
       archivePrefix={arXiv},
       primaryClass={quant-ph},
