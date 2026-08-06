@@ -114,6 +114,33 @@ def test_application_discretizations_have_the_paper_dimensions() -> None:
     assert torch.allclose(heat["matrix"], heat["matrix"].T)
 
 
+def test_oscillator_force_amplitudes_use_the_explicit_config_key() -> None:
+    harmonic_params = CONFIG["problems"]["harmonic_oscillator"]
+    damped_params = CONFIG["problems"]["damped_oscillator"]
+
+    assert harmonic_params["force_amplitude"] == 9.0
+    assert damped_params["force_amplitude"] == 9.0
+    assert "C" not in harmonic_params
+    assert "C" not in damped_params
+
+
+def test_harmonic_oscillator_system_is_numerically_unchanged() -> None:
+    problem = build_harmonic_oscillator(
+        CONFIG["problems"]["harmonic_oscillator"], scale=False
+    )
+    expected_diagonal = -2.0 + 5.0 / 7.0 * 0.5**2
+    expected_rhs = 0.5**2 * 9.0 * np.sin(np.pi * 0.4 * np.arange(0.5, 50.0, 0.5))
+    expected_rhs[0] -= 5.0
+    expected_rhs[-1] -= 3.0
+
+    assert problem["matrix"].numpy() == pytest.approx(
+        np.diag(np.full(99, expected_diagonal))
+        + np.diag(np.ones(98), k=1)
+        + np.diag(np.ones(98), k=-1)
+    )
+    assert problem["rhs"].numpy() == pytest.approx(expected_rhs)
+
+
 def test_random_systems_are_deterministic_symmetric_and_sparse() -> None:
     random_config = {**CONFIG["random"], "singular_tolerance": 1e-12}
     first = generate_random_problems(random_config)

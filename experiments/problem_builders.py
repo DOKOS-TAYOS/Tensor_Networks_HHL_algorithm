@@ -47,7 +47,7 @@ def build_harmonic_oscillator(
     """Build the 99-unknown forced harmonic oscillator system."""
     grid = oscillator_grid(T=float(params["T"]), dt=float(params["dt"]))
     k, mass = float(params["k"]), float(params["m"])
-    frequency, amplitude = float(params["nu"]), float(params["C"])
+    frequency, amplitude = float(params["nu"]), float(params["force_amplitude"])
     x0, xT = float(params["x0"]), float(params["xT"])
     dt = float(grid["dt"])
     n = int(grid["n_interior"])
@@ -83,7 +83,7 @@ def build_damped_oscillator(
     """Build the damped 99-square system and its 198-square embedding."""
     grid = oscillator_grid(T=float(params["T"]), dt=float(params["dt"]))
     k, mass = float(params["k"]), float(params["m"])
-    frequency, amplitude = float(params["nu"]), float(params["C"])
+    frequency, amplitude = float(params["nu"]), float(params["force_amplitude"])
     x0, xT = float(params["x0"]), float(params["xT"])
     dt = float(grid["dt"])
     n = int(grid["n_interior"])

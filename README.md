@@ -62,7 +62,7 @@ Each section is self-contained and annotated for clarity.
 
 - The notebook encodes the HHL quantum circuit using tensor networks.
 - It implements all gates (QPE, inversion, unitaries) as tensor contractions.
-- The final solution vector $\vec{x}$ is obtained deterministically, bypassing quantum limitations like post-selection.
+- The tensor-network contraction deterministically evaluates the joint postselected branch and its associated probability; it does not remove the postselection condition of HHL.
 
 ### Parameter conventions
 
