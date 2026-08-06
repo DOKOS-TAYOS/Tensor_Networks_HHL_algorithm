@@ -30,11 +30,19 @@ The project simulates, using tensor networks and qudit formalism, the finite-res
 pip install -r requirements.txt
 ```
 
-For experiments, generated artefacts, Qiskit comparisons, memory measurements, and tests, install:
+For experiments, generated artefacts, Qiskit comparisons, memory measurements, and tests, a generally compatible environment can be installed with:
 
 ```bash
-pip install -r requirements_experiments.txt
+python -m pip install -r requirements_experiments.txt
 ```
+
+For exact reproduction of the numerical results reported in the manuscript, use the frozen dependency specification generated from the experiment environment:
+
+```bash
+python -m pip install -r requirements_experiments_lock.txt
+```
+
+The frozen file records the package versions used for the final manuscript results. The unpinned `requirements_experiments.txt` is retained as a more flexible compatibility specification.
 
 The notebook is compatible with standard Python 3.x and requires no GPU. All computations were tested on CPU.
 
