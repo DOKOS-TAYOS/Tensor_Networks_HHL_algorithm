@@ -5,9 +5,15 @@ import json
 from pathlib import Path
 
 import numpy as np
+import pytest
 import torch
+from scipy import stats
 
-from experiments.run_reviewer_r1_c5_c6 import compare_tn_and_filter, run_experiments
+from experiments.run_reviewer_r1_c5_c6 import (
+    compare_tn_and_filter,
+    random_instance_summary,
+    run_experiments,
+)
 from experiments.run_reviewer_r2_c3_c4 import (
     DEFAULT_MU_SWEEP_N,
     DEFAULT_MU_VALUES,
@@ -29,6 +35,7 @@ SCIENTIFIC_ARTIFACTS = {
     "tau_lambda_values.csv",
     "parameter_search.csv",
     "random_instance_results.csv",
+    "random_instance_summary.csv",
     "hyperparameter_sweep.csv",
     "tn_filter_validation.csv",
     "OAF.pdf",
@@ -88,6 +95,53 @@ def test_full_tn_matches_the_spectral_filter_on_an_exact_grid() -> None:
 
     assert row["tn_filter_relative_difference"] < 1e-10
     assert row["tn_filter_rmse"] < 1e-10
+
+
+def test_random_instance_summary_has_student_intervals() -> None:
+    rows = [
+        {
+            "condition_number": 2.0,
+            "rmse": 1.0,
+            "relative_solution_error": 0.25,
+            "normalized_residual": 0.125,
+            "predicted_rhs_filter_relative_error": 0.0625,
+        },
+        {
+            "condition_number": 4.0,
+            "rmse": 3.0,
+            "relative_solution_error": 0.75,
+            "normalized_residual": 0.375,
+            "predicted_rhs_filter_relative_error": 0.1875,
+        },
+    ]
+
+    summary = random_instance_summary(rows)
+
+    expected_columns = {
+        "n_instances",
+        "confidence_level",
+        *{
+            f"{metric}_{statistic}"
+            for metric in (
+                "condition_number",
+                "rmse",
+                "relative_solution_error",
+                "normalized_residual",
+                "predicted_rhs_filter_relative_error",
+            )
+            for statistic in ("mean", "std", "ci95_low", "ci95_high")
+        },
+    }
+    assert set(summary) == expected_columns
+    assert summary["n_instances"] == 2
+    assert summary["confidence_level"] == 0.95
+
+    sample = np.array([1.0, 3.0])
+    half_width = stats.t.ppf(0.975, df=1) * np.std(sample, ddof=1) / np.sqrt(2)
+    assert summary["rmse_mean"] == pytest.approx(np.mean(sample))
+    assert summary["rmse_std"] == pytest.approx(np.std(sample, ddof=1))
+    assert summary["rmse_ci95_low"] == pytest.approx(np.mean(sample) - half_width)
+    assert summary["rmse_ci95_high"] == pytest.approx(np.mean(sample) + half_width)
 
 
 def test_reviewer_r2_scaling_smoke() -> None:

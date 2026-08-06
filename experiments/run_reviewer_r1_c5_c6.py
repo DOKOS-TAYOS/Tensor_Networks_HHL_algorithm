@@ -626,6 +626,33 @@ def _random_experiments(
     return problems, result_rows, search_rows, spectral_rows, phase_rows
 
 
+def random_instance_summary(
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    """Aggregate random-instance accuracy metrics with 95% Student-t intervals."""
+    if len(rows) < 2:
+        raise ValueError("random-instance summary requires at least two rows")
+    summary: dict[str, object] = {
+        "n_instances": len(rows),
+        "confidence_level": 0.95,
+    }
+    for metric in (
+        "condition_number",
+        "rmse",
+        "relative_solution_error",
+        "normalized_residual",
+        "predicted_rhs_filter_relative_error",
+    ):
+        mean, sample_std, _, ci95_low, ci95_high = mean_statistics(
+            [float(row[metric]) for row in rows]
+        )
+        summary[f"{metric}_mean"] = mean
+        summary[f"{metric}_std"] = sample_std
+        summary[f"{metric}_ci95_low"] = ci95_low
+        summary[f"{metric}_ci95_high"] = ci95_high
+    return summary
+
+
 def _hyperparameter_sweep(
     problems: Sequence[Mapping[str, object]],
     config: Mapping[str, object],
@@ -852,6 +879,10 @@ def run_experiments(
     _write_csv(output_dir / "tau_lambda_values.csv", phase_rows)
     _write_csv(output_dir / "parameter_search.csv", search_rows)
     _write_csv(output_dir / "random_instance_results.csv", random_rows)
+    _write_csv(
+        output_dir / "random_instance_summary.csv",
+        [random_instance_summary(random_rows)],
+    )
     _write_csv(output_dir / "hyperparameter_sweep.csv", sweep_rows)
     _write_csv(output_dir / "tn_filter_validation.csv", tn_filter_validation_rows)
 
