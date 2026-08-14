@@ -54,13 +54,23 @@ PROBLEM_MAP = {
     "2D Heat Equation": "C2D",
 }
 
-DEFAULT_TAU = {"OAF": 6000, "OAA": 11000, "C2D": 100}
+# Defaults are grounded in the reviewed parameter sweep. OAF fits the hosted
+# memory budget at the exact selected benchmark. For OAA and C2D, use the best
+# sampled point that remains below the app's 2 GiB core-tensor guard.
+DEFAULT_TAU = {"OAF": 3967, "OAA": 5395, "C2D": 23}
+DEFAULT_MU = {"OAF": 2000, "OAA": 2000, "C2D": 512}
+
+REVIEWED_BENCHMARK = {
+    "OAF": {"mu": 2000, "tau": 3966.6280166708093},
+    "OAA": {"mu": 4096, "tau": 8892.098602882095},
+    "C2D": {"mu": 1024, "tau": 44.97941097041009},
+}
 
 DEFAULT_PARAMS = {
     "OAF": {
         "k": 5.0,
         "m": 7.0,
-        "nu": 3.14,
+        "nu": 0.4,
         "C": 9.0,
         "x0": 5.0,
         "xq": 3.0,
@@ -73,7 +83,7 @@ DEFAULT_PARAMS = {
         "nu": 0.4,
         "C": 9.0,
         "x0": 5.0,
-        "xq": 2.0,
+        "xq": 3.0,
         "dt": 0.5,
         "steps": 100,
         "gamma": 0.1,
@@ -85,8 +95,8 @@ DEFAULT_PARAMS = {
         "u1y": 4.0,
         "u2y": 2.0,
         "dxy": 0.5,
-        "nx": 15,
-        "ny": 15,
+        "nx": 20,
+        "ny": 20,
     },
 }
 
@@ -257,17 +267,23 @@ with left_col:
             max_value=int(default_tau * 10),
             value=default_tau,
             key=f"tau_{problem}",
-            help="Finite spectral-grid spacing is Delta lambda = 1/tau.",
+            help=(
+                "Finite spectral-grid spacing is Delta lambda = 1/tau. "
+                f"Reviewed benchmark tau: {REVIEWED_BENCHMARK[problem]['tau']:.2f}."
+            ),
         )
 
     with phase_col:
         num_eigen = st.slider(
             "Phase-register dimension mu (API name num_eigen)",
             min_value=100,
-            max_value=3000,
-            value=2000,
+            max_value=4096,
+            value=DEFAULT_MU[problem],
             key=f"mu_{problem}",
-            help="mu is the phase-register dimension, not a count of eigenvalues.",
+            help=(
+                "mu is the phase-register dimension, not a count of eigenvalues. "
+                f"Reviewed benchmark mu: {REVIEWED_BENCHMARK[problem]['mu']}."
+            ),
         )
 
 with right_col:
@@ -292,6 +308,12 @@ with right_col:
                     key=f"{problem}_{key}",
                     help=f"Parameter {key} for the {problem} example.",
                 )
+
+    benchmark = REVIEWED_BENCHMARK[problem]
+    st.caption(
+        f"Hosted default: mu={DEFAULT_MU[problem]}, tau={DEFAULT_TAU[problem]}. "
+        f"Reviewed benchmark: mu={benchmark['mu']}, tau={benchmark['tau']:.2f}."
+    )
 
     estimated_storage_gib = _estimated_core_storage_gib(problem, params, num_eigen)
     st.caption(
