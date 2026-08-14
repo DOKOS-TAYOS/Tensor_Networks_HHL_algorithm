@@ -356,10 +356,16 @@ if last_result is not None:
         f"{last_result['problem_selection']} | "
         f"mu={last_result['mu']} | tau={last_result['tau']:g}"
     )
-    if last_result["problem"] != problem:
+    current_inputs_match = (
+        last_result["problem"] == problem
+        and last_result["params"] == dict(params)
+        and last_result["mu"] == int(num_eigen)
+        and last_result["tau"] == float(tau)
+    )
+    if not current_inputs_match:
         st.info(
-            "The plots below are the last completed run. Current input controls are set "
-            "to a different problem; press Run solver to replace these results."
+            "The plots below are the last completed run. One or more current solver "
+            "inputs have changed; press Run solver to refresh these results."
         )
 
     result_problem = last_result["problem"]
